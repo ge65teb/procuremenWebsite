@@ -523,38 +523,65 @@ const CRISIS_DATA = (() => {
   const rng = makeRng(42);
   const N = 340; // Mar 1, 2022 – Jan 31, 2023
 
-  // Precise waypoints from image reading: [day, blue, orange(SL), green(TP)]
-  // blue  = Terminmarktpreis  (volatile)
-  // orange = Stop-Loss        (smooth trailing band, follows market up)
-  // green  = Take-Profit      (ecoplanet avg; drops Apr–May, recovers Jul–Aug,
-  //                            crashes Sep 26, jumps Oct, declines through Feb)
+  // Dense waypoints every ~7 days, hand-traced from uploaded image
+  // [day, blue(Terminmarkt), orange(Stop-Loss), green(Take-Profit/ecoplanet)]
   const wp = [
-    [0,   96,  100,  84],  // Mar 1
-    [20,  112, 112,  76],  // Mar 21
-    [31,  140, 132,  67],  // Apr 1
-    [61,  165, 158,  52],  // May 1 – green at trough
-    [76,  155, 165,  58],  // May 16
-    [92,  133, 170,  80],  // Jun 1 – blue dips
-    [107, 148, 174,  95],  // Jun 16
-    [122, 150, 178, 113],  // Jul 1
-    [137, 162, 182, 120],  // Jul 16
-    [153, 170, 188, 126],  // Aug 1
-    [168, 192, 198, 130],  // Aug 16
-    [184, 218, 215, 132],  // Sep 1
-    [196, 255, 248, 133],  // Sep 13
-    [205, 278, 260, 120],  // Sep 22
-    [209, 282, 265,  68],  // Sep 26 = E2 (Nord Stream – green crashes)
-    [213, 215, 205,  66],  // Sep 30 – blue drops fast
-    [219, 188, 190, 186],  // Oct 6  – green jumps (market reset)
-    [225, 176, 183, 184],  // Oct 12 = E3 (blue below SL)
-    [245, 168, 190, 175],  // Nov 1
-    [260, 172, 193, 170],  // Nov 16
-    [275, 174, 197, 167],  // Dec 1
-    [290, 170, 200, 165],  // Dec 16
-    [306, 150, 202, 163],  // Jan 1 2023
-    [315, 158, 203, 162],  // Jan 10 = E4 (blue near green)
-    [325, 142, 204, 148],  // Jan 20
-    [337, 133, 205, 123],  // Jan 31
+    [0,   96,  100,  84],   // 01 Mär '22
+    [7,   104, 106,  81],   // 08 Mär
+    [14,  113, 112,  77],   // 15 Mär
+    [21,  126, 119,  73],   // 22 Mär
+    [28,  138, 127,  69],   // 29 Mär
+    [35,  149, 134,  65],   // 05 Apr
+    [42,  158, 140,  62],   // 12 Apr
+    [49,  164, 146,  59],   // 19 Apr
+    [56,  166, 152,  56],   // 26 Apr
+    [63,  167, 157,  53],   // 03 Mai
+    [70,  163, 162,  52],   // 10 Mai – green trough & blue local peak
+    [77,  157, 164,  54],   // 17 Mai
+    [84,  151, 166,  58],   // 24 Mai
+    [91,  142, 168,  65],   // 31 Mai
+    [98,  134, 169,  73],   // 07 Jun – blue dips (local low)
+    [105, 142, 170,  82],   // 14 Jun
+    [112, 150, 172,  91],   // 21 Jun
+    [119, 148, 174,  99],   // 28 Jun
+    [126, 152, 176, 108],   // 05 Jul
+    [133, 158, 178, 116],   // 12 Jul
+    [140, 163, 181, 122],   // 19 Jul
+    [147, 169, 184, 127],   // 26 Jul
+    [154, 174, 187, 129],   // 02 Aug
+    [161, 184, 192, 131],   // 09 Aug
+    [168, 198, 198, 132],   // 16 Aug
+    [175, 214, 208, 132],   // 23 Aug – E1: blue crosses above SL
+    [182, 238, 228, 133],   // 30 Aug
+    [189, 258, 245, 133],   // 06 Sep
+    [196, 274, 257, 132],   // 13 Sep
+    [203, 281, 263, 131],   // 20 Sep
+    [207, 283, 265, 128],   // 24 Sep
+    [209, 284, 266,  68],   // 26 Sep – E2: Nord Stream (green crashes instantly)
+    [211, 268, 255,  67],   // 28 Sep
+    [213, 238, 232,  67],   // 30 Sep
+    [215, 208, 210,  67],   // 02 Okt
+    [217, 192, 195,  68],   // 04 Okt
+    [218, 184, 190, 188],   // 05 Okt – E3: blue below SL, green jumps
+    [221, 177, 191, 186],   // 08 Okt
+    [228, 172, 191, 183],   // 15 Okt
+    [235, 175, 192, 180],   // 22 Okt
+    [242, 170, 193, 177],   // 29 Okt
+    [249, 168, 194, 174],   // 05 Nov
+    [256, 172, 195, 171],   // 12 Nov
+    [263, 175, 196, 168],   // 19 Nov
+    [270, 172, 197, 166],   // 26 Nov
+    [277, 170, 198, 164],   // 03 Dez
+    [284, 173, 199, 162],   // 10 Dez
+    [291, 170, 200, 161],   // 17 Dez
+    [298, 163, 201, 161],   // 24 Dez
+    [306, 155, 202, 162],   // 01 Jan '23
+    [310, 165, 202, 162],   // 05 Jan
+    [314, 156, 203, 161],   // 09 Jan – E4: blue crosses below green
+    [319, 147, 203, 157],   // 14 Jan
+    [326, 142, 204, 146],   // 21 Jan
+    [333, 137, 204, 133],   // 28 Jan
+    [337, 133, 205, 124],   // 01 Feb
   ];
 
   const lerp = (a,b,t) => a+(b-a)*t;
@@ -574,17 +601,18 @@ const CRISIS_DATA = (() => {
     const d = new Date(start); d.setDate(start.getDate()+i);
     const mo=['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'][d.getMonth()];
     labels.push(`${d.getDate()}. ${mo} '${String(d.getFullYear()).slice(2)}`);
-    blue.push(  +(interp(i,1)+(rng()-0.5)*18).toFixed(1));
-    orange.push(+(interp(i,2)+(rng()-0.5)*4 ).toFixed(1));
-    green.push( +(interp(i,3)+(rng()-0.5)*8 ).toFixed(1));
+    // Reduced noise: blue ±10, orange ±2, green ±5
+    blue.push(  +(interp(i,1)+(rng()-0.5)*10).toFixed(1));
+    orange.push(+(interp(i,2)+(rng()-0.5)*2 ).toFixed(1));
+    green.push( +(interp(i,3)+(rng()-0.5)*5 ).toFixed(1));
   }
 
-  // Force exact event values for clean crossings
-  const E1=184, E2=209, E3=225, E4=315;
-  blue[E1]=218;  orange[E1]=215;             // E1: blue just above SL
-  blue[E2]=282;  orange[E2]=265; green[E2]=68; // E2: Nord Stream peak
-  blue[E3]=176;  orange[E3]=183;             // E3: blue just below SL
-  blue[E4]=158;  green[E4]=160;              // E4: blue just below TP
+  // Force exact crossing values (overrides noise at event days)
+  const E1=175, E2=209, E3=218, E4=314;
+  blue[E1]=214;  orange[E1]=208;                // E1: blue (214) > orange (208)
+  blue[E2]=284;  orange[E2]=266; green[E2]=68;  // E2: Nord Stream peak
+  blue[E3]=184;  orange[E3]=190; green[E3]=188; // E3: blue (184) < orange (190)
+  blue[E4]=156;  green[E4] =161;                // E4: blue (156) < green (161)
 
   return { labels, blue, orange, green, N, E1, E2, E3, E4 };
 })();
@@ -740,12 +768,15 @@ const CrisisChart = () => {
 const CM_DATA = (() => {
   const rng = makeRng(77);
   // 90 daily points: Jan 2 – Apr 1, 2026
-  // Matches uploaded image: blue starts 9.4, drops to 8.02 (Feb 10), rebounds to 8.90 (Mar 8), continues to ~10.2
+  // Hand-traced from uploaded image:
+  //   blue starts ~9.35, noisy downtrend → 8.02 (Feb 10, EVENT1)
+  //   rebounds → 8.90 (Mar 8, EVENT2)
+  //   then sharp continued rise → ~10.6 by Apr 1
   const N = 90;
   const labels = [];
   const blue = [];
-  const green = Array(N).fill(8.02);
-  const orange = Array(N).fill(8.90);
+  const green = Array(N).fill(8.02);   // Take-Profit horizontal line
+  const orange = Array(N).fill(8.90);  // Stop-Loss horizontal line
 
   const start = new Date(2026, 0, 2);
   for (let i = 0; i < N; i++) {
@@ -755,31 +786,42 @@ const CM_DATA = (() => {
     labels.push(`${d.getDate()}. ${mo}`);
   }
 
-  const EVENT1 = 39; // Feb 10 – blue crosses Take-Profit (8.02)
-  const EVENT2 = 65; // Mar 8  – blue crosses Stop-Loss (8.90)
+  const EVENT1 = 39; // Feb 10 – blue touches Take-Profit at 8.02
+  const EVENT2 = 65; // Mar 8  – blue crosses Stop-Loss at 8.90
 
-  // Jan 2 → Feb 10: 9.40 down to 8.02 with noise
-  for (let i = 0; i <= EVENT1; i++) {
-    const t = i / EVENT1;
-    const base = 9.40 + (8.02 - 9.40) * t;
-    blue.push(+(base + (rng()-0.5)*0.30*(1-t*0.5)).toFixed(3));
+  // Dense waypoints for blue: [day, value]
+  const bwp = [
+    [0,  9.35],
+    [4,  9.42],  [8,  9.28],  [12, 9.18],  [16, 9.08],
+    [20, 8.92],  [24, 8.85],  [28, 8.72],  [32, 8.58],
+    [36, 8.38],  [39, 8.02],  // EVENT1 – Take-Profit crossing
+    [42, 8.12],  [46, 8.28],  [50, 8.48],  [54, 8.62],
+    [58, 8.72],  [62, 8.82],  [65, 8.90],  // EVENT2 – Stop-Loss crossing
+    [68, 9.05],  [72, 9.22],  [76, 9.45],
+    [80, 9.72],  [84,10.05],  [88,10.42],  [89,10.58],
+  ];
+
+  const lerp = (a,b,t) => a+(b-a)*t;
+  const bInterp = (day) => {
+    for (let j=0; j<bwp.length-1; j++) {
+      if (day>=bwp[j][0] && day<=bwp[j+1][0]) {
+        const t=(day-bwp[j][0])/(bwp[j+1][0]-bwp[j][0]);
+        return lerp(bwp[j][1], bwp[j+1][1], t);
+      }
+    }
+    return bwp[bwp.length-1][1];
+  };
+
+  // Noise tapers off near crossings for clean intersection
+  for (let i = 0; i < N; i++) {
+    const distE1 = Math.abs(i - EVENT1);
+    const distE2 = Math.abs(i - EVENT2);
+    const noiseScale = Math.min(distE1, distE2) < 3 ? 0.05 : 0.22;
+    blue.push(+(bInterp(i) + (rng()-0.5)*noiseScale).toFixed(3));
   }
+  // Force exact crossing values
   blue[EVENT1] = 8.02;
-
-  // Feb 10 → Mar 8: 8.02 recovering to 8.90
-  const seg2 = EVENT2 - EVENT1;
-  for (let i = 1; i < seg2; i++) {
-    const t = i / seg2;
-    blue.push(+(8.02 + (8.90-8.02)*t + (rng()-0.5)*0.25).toFixed(3));
-  }
   blue[EVENT2] = 8.90;
-
-  // Mar 8 → Apr 1: 8.90 rising steeply to ~10.20 (matches image)
-  const seg3 = N - EVENT2;
-  for (let i = 1; i < seg3; i++) {
-    const t = i / seg3;
-    blue.push(+(8.90 + (10.20-8.90)*t + (rng()-0.5)*0.28).toFixed(3));
-  }
 
   return { labels, blue, green, orange, EVENT1, EVENT2, N };
 })();
@@ -831,7 +873,7 @@ const CurrentMarketChart = () => {
   const W = 820, H = 230, PAD = { l:50, r:20, t:16, b:32 };
   const cw = W - PAD.l - PAD.r;
   const ch = H - PAD.t - PAD.b;
-  const yMin = 7.4, yMax = 10.8;
+  const yMin = 7.4, yMax = 11.2;
   const xOf = i => PAD.l + (i / (N-1)) * cw;
   const yOf = v => PAD.t + (1 - (v - yMin)/(yMax - yMin)) * ch;
 
@@ -840,7 +882,7 @@ const CurrentMarketChart = () => {
   const greenPath = `M ${xOf(0)},${yOf(8.02)} L ${xOf(N-1)},${yOf(8.02)}`;
   const orangePath= `M ${xOf(0)},${yOf(8.90)} L ${xOf(N-1)},${yOf(8.90)}`;
 
-  const gridYs = [7.5, 8.0, 8.5, 9.0, 9.5, 10.0, 10.5];
+  const gridYs = [7.5, 8.0, 8.5, 9.0, 9.5, 10.0, 10.5, 11.0];
   // X-axis month ticks
   const monthTicks = [0, 30, 58, 89]; // Jan, Feb, Mar, Apr approx
   const monthNames = ['Jan', 'Feb', 'Mär', 'Apr'];
