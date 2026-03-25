@@ -601,10 +601,10 @@ const CRISIS_DATA = (() => {
     const d = new Date(start); d.setDate(start.getDate()+i);
     const mo=['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'][d.getMonth()];
     labels.push(`${d.getDate()}. ${mo} '${String(d.getFullYear()).slice(2)}`);
-    // Reduced noise: blue ±10, orange ±2, green ±5
-    blue.push(  +(interp(i,1)+(rng()-0.5)*10).toFixed(1));
-    orange.push(+(interp(i,2)+(rng()-0.5)*2 ).toFixed(1));
-    green.push( +(interp(i,3)+(rng()-0.5)*5 ).toFixed(1));
+    // Noise matching image: blue ±14 (very volatile), orange ±6, green ±9
+    blue.push(  +(interp(i,1)+(rng()-0.5)*14).toFixed(1));
+    orange.push(+(interp(i,2)+(rng()-0.5)*6 ).toFixed(1));
+    green.push( +(interp(i,3)+(rng()-0.5)*9 ).toFixed(1));
   }
 
   // Force exact crossing values (overrides noise at event days)
@@ -691,9 +691,16 @@ const CrisisChart = () => {
             {monthTicks.map(({i,label})=>(
               <text key={i} x={xOf(i)} y={H-4} fontSize="9" fill="#6B7280" textAnchor="middle">{label}</text>
             ))}
-            {step>0 && <path d={mkPath(green)}  stroke="#16A34A" strokeWidth="2"   fill="none" strokeLinecap="round" strokeLinejoin="round"/>}
-            {step>0 && <path d={mkPath(orange)} stroke="#D97706" strokeWidth="2"   fill="none" strokeLinecap="round" strokeLinejoin="round"/>}
-            {step>0 && <path d={mkPath(blue)}   stroke="#2563EB" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>}
+            {/* Green & orange always visible in full — reference lines */}
+            {(() => {
+              const fp = arr => 'M '+arr.map((v,i)=>`${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(' L ');
+              return <>
+                <path d={fp(green)}  stroke="#16A34A" strokeWidth="2"   fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d={fp(orange)} stroke="#D97706" strokeWidth="2"   fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+              </>;
+            })()}
+            {/* Blue market line — animated */}
+            {step>0 && <path d={mkPath(blue)} stroke="#2563EB" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>}
             {EVENTS.map(({e,c})=> step>=e && (
               <line key={e} x1={xOf(e)} y1={PAD.t} x2={xOf(e)} y2={H-PAD.b} stroke={c} strokeWidth="1.5" strokeDasharray="3 2" opacity="0.7"/>
             ))}
@@ -768,15 +775,13 @@ const CrisisChart = () => {
 const CM_DATA = (() => {
   const rng = makeRng(77);
   // 90 daily points: Jan 2 – Apr 1, 2026
-  // Hand-traced from uploaded image:
-  //   blue starts ~9.35, noisy downtrend → 8.02 (Feb 10, EVENT1)
-  //   rebounds → 8.90 (Mar 8, EVENT2)
-  //   then sharp continued rise → ~10.6 by Apr 1
+  // ALL three lines hand-traced from uploaded image — none are static/flat
+  // EVENT1 = Feb 10 (day 39): blue drops below green at 8.02 ct/kWh
+  // EVENT2 = Mar 8  (day 65): blue rises above orange at 8.90 ct/kWh
   const N = 90;
   const labels = [];
-  const blue = [];
-  const green = Array(N).fill(8.02);   // Take-Profit horizontal line
-  const orange = Array(N).fill(8.90);  // Stop-Loss horizontal line
+  const blue = [], green = [], orange = [];
+  const EVENT1 = 39, EVENT2 = 65;
 
   const start = new Date(2026, 0, 2);
   for (let i = 0; i < N; i++) {
@@ -786,42 +791,59 @@ const CM_DATA = (() => {
     labels.push(`${d.getDate()}. ${mo}`);
   }
 
-  const EVENT1 = 39; // Feb 10 – blue touches Take-Profit at 8.02
-  const EVENT2 = 65; // Mar 8  – blue crosses Stop-Loss at 8.90
-
-  // Dense waypoints for blue: [day, value]
-  const bwp = [
-    [0,  9.35],
-    [4,  9.42],  [8,  9.28],  [12, 9.18],  [16, 9.08],
-    [20, 8.92],  [24, 8.85],  [28, 8.72],  [32, 8.58],
-    [36, 8.38],  [39, 8.02],  // EVENT1 – Take-Profit crossing
-    [42, 8.12],  [46, 8.28],  [50, 8.48],  [54, 8.62],
-    [58, 8.72],  [62, 8.82],  [65, 8.90],  // EVENT2 – Stop-Loss crossing
-    [68, 9.05],  [72, 9.22],  [76, 9.45],
-    [80, 9.72],  [84,10.05],  [88,10.42],  [89,10.58],
-  ];
-
   const lerp = (a,b,t) => a+(b-a)*t;
-  const bInterp = (day) => {
-    for (let j=0; j<bwp.length-1; j++) {
-      if (day>=bwp[j][0] && day<=bwp[j+1][0]) {
-        const t=(day-bwp[j][0])/(bwp[j+1][0]-bwp[j][0]);
-        return lerp(bwp[j][1], bwp[j+1][1], t);
+  const interp = (day, wps) => {
+    for (let j=0; j<wps.length-1; j++) {
+      if (day>=wps[j][0] && day<=wps[j+1][0]) {
+        const t=(day-wps[j][0])/(wps[j+1][0]-wps[j][0]);
+        return lerp(wps[j][1], wps[j+1][1], t);
       }
     }
-    return bwp[bwp.length-1][1];
+    return wps[wps.length-1][1];
   };
 
-  // Noise tapers off near crossings for clean intersection
+  // ── BLUE: Terminmarktpreis (animated, volatile) ──────────────────────────
+  // Jan: ~8.52 starting, gentle waves. Dips in late Jan–Feb toward green.
+  // Mar: sharp spike to ~9.85 (early Mar), then drops, then rises above orange.
+  const blueWP = [
+    [0, 8.52], [3, 8.44], [7, 8.57], [11, 8.65], [15, 8.70],
+    [18, 8.74], [21, 8.64], [25, 8.52], [29, 8.40], [33, 8.28],
+    [36, 8.14], [39, 8.00],               // ← EVENT1 crossing
+    [42, 8.14], [46, 8.32], [49, 8.22], [53, 8.38],
+    [56, 8.26], [59, 8.34], [61, 8.60], [62, 9.24],
+    [63, 9.86], [64, 9.18], [65, 8.90],   // ← EVENT2 crossing (spike → back down)
+    [67, 8.62], [70, 8.84], [72, 8.76], [75, 9.02],
+    [78, 9.22], [81, 8.96], [84, 9.20], [87, 9.52], [89, 9.68],
+  ];
+
+  // ── ORANGE: Stop-Loss (static reference, slightly declining then rising) ──
+  // Starts ~8.88, barely moves in Jan–Feb, then rises from Mar onward
+  const orangeWP = [
+    [0, 8.88], [8, 8.86], [16, 8.84], [24, 8.82], [32, 8.80],
+    [40, 8.78], [50, 8.76], [58, 8.74], [65, 8.90],  // EVENT2 value
+    [70, 9.02], [75, 9.14], [80, 9.28], [85, 9.40], [89, 9.48],
+  ];
+
+  // ── GREEN: Take-Profit (static reference, rises then declines steeply) ───
+  // Jan: starts ~8.48, rises slightly to ~8.52, then steadily declines.
+  // Crosses below EVENT1 (8.02) around Feb 10, continues to ~6.80 by Apr 1.
+  const greenWP = [
+    [0, 8.48], [8, 8.50], [16, 8.52], [24, 8.51], [30, 8.48],
+    [35, 8.38], [39, 8.02],            // EVENT1 forced value
+    [44, 7.80], [50, 7.60], [56, 7.44], [62, 7.30],
+    [68, 7.16], [74, 7.04], [80, 6.92], [85, 6.83], [89, 6.78],
+  ];
+
   for (let i = 0; i < N; i++) {
-    const distE1 = Math.abs(i - EVENT1);
-    const distE2 = Math.abs(i - EVENT2);
-    const noiseScale = Math.min(distE1, distE2) < 3 ? 0.05 : 0.22;
-    blue.push(+(bInterp(i) + (rng()-0.5)*noiseScale).toFixed(3));
+    const dE = Math.min(Math.abs(i-EVENT1), Math.abs(i-EVENT2));
+    const nb = dE < 2 ? 0.04 : 0.18;   // blue: taper noise near crossings
+    blue.push(  +(interp(i, blueWP)   + (rng()-0.5)*nb  ).toFixed(3));
+    orange.push(+(interp(i, orangeWP) + (rng()-0.5)*0.03).toFixed(3));
+    green.push( +(interp(i, greenWP)  + (rng()-0.5)*0.03).toFixed(3));
   }
-  // Force exact crossing values
-  blue[EVENT1] = 8.02;
-  blue[EVENT2] = 8.90;
+  // Force exact crossing values so event triggers are visually clean
+  blue[EVENT1]   = 8.00;  green[EVENT1]  = 8.02;
+  blue[EVENT2]   = 8.90;  orange[EVENT2] = 8.90;
 
   return { labels, blue, green, orange, EVENT1, EVENT2, N };
 })();
@@ -870,21 +892,24 @@ const CurrentMarketChart = () => {
   const replay = () => { setStep(0); setNotifications([]); setPlaying(true); };
 
   // SVG dimensions
-  const W = 820, H = 230, PAD = { l:50, r:20, t:16, b:32 };
+  const W = 820, H = 240, PAD = { l:50, r:20, t:16, b:32 };
   const cw = W - PAD.l - PAD.r;
   const ch = H - PAD.t - PAD.b;
-  const yMin = 7.4, yMax = 11.2;
+  const yMin = 6.5, yMax = 10.4;
   const xOf = i => PAD.l + (i / (N-1)) * cw;
   const yOf = v => PAD.t + (1 - (v - yMin)/(yMax - yMin)) * ch;
 
-  const pts = (arr) => arr.slice(0, step+1).map((v,i) => `${xOf(i)},${yOf(v)}`).join(' ');
-  const bluePath  = step > 0 ? `M ${pts(blue).replace(/ /g,' L ')}` : '';
-  const greenPath = `M ${xOf(0)},${yOf(8.02)} L ${xOf(N-1)},${yOf(8.02)}`;
-  const orangePath= `M ${xOf(0)},${yOf(8.90)} L ${xOf(N-1)},${yOf(8.90)}`;
+  // Blue: animated (reveals day by day)
+  const bluePath = step > 0
+    ? 'M ' + blue.slice(0,step+1).map((v,i)=>`${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(' L ')
+    : '';
+  // Green & orange: always shown in full (reference lines)
+  const fullPath = arr => 'M ' + arr.map((v,i)=>`${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(' L ');
+  const greenPath  = fullPath(green);
+  const orangePath = fullPath(orange);
 
-  const gridYs = [7.5, 8.0, 8.5, 9.0, 9.5, 10.0, 10.5, 11.0];
-  // X-axis month ticks
-  const monthTicks = [0, 30, 58, 89]; // Jan, Feb, Mar, Apr approx
+  const gridYs = [7.0, 7.5, 8.0, 8.5, 9.0, 9.5, 10.0];
+  const monthTicks = [0, 30, 58, 89];
   const monthNames = ['Jan', 'Feb', 'Mär', 'Apr'];
 
   return (
@@ -905,13 +930,10 @@ const CurrentMarketChart = () => {
             {monthTicks.map((idx,i) => (
               <text key={i} x={xOf(idx)} y={H - 4} fontSize="10" fill="#6B7280" textAnchor="middle">{monthNames[i]}</text>
             ))}
-            {/* Static horizontal lines (always shown as guide) */}
-            <path d={greenPath}  stroke="#16A34A" strokeWidth="1.5" strokeDasharray="5 3" fill="none" opacity="0.5"/>
-            <path d={orangePath} stroke="#D97706" strokeWidth="1.5" strokeDasharray="5 3" fill="none" opacity="0.5"/>
-            {/* Labels for lines */}
-            <text x={W - PAD.r + 4} y={yOf(8.02)+4}  fontSize="9" fill="#16A34A">TP</text>
-            <text x={W - PAD.r + 4} y={yOf(8.90)+4}  fontSize="9" fill="#D97706">SL</text>
-            {/* Blue market line */}
+            {/* Green Take-Profit & orange Stop-Loss — full curves, always visible */}
+            <path d={orangePath} stroke="#D97706" strokeWidth="2"   fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d={greenPath}  stroke="#16A34A" strokeWidth="2"   fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+            {/* Blue market line — animated */}
             {step > 0 && <path d={bluePath} stroke="#2563EB" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>}
             {/* Event vertical markers */}
             {step >= EVENT1 && (
@@ -935,11 +957,11 @@ const CurrentMarketChart = () => {
             </span>
             <span className="flex items-center gap-1.5">
               <span style={{ width:20, height:2, background:'#16A34A', display:'inline-block', borderRadius:2, opacity:0.8 }}/>
-              Take-Profit (8,02 ct)
+              Take-Profit Linie
             </span>
             <span className="flex items-center gap-1.5">
               <span style={{ width:20, height:2, background:'#D97706', display:'inline-block', borderRadius:2, opacity:0.8 }}/>
-              Stop-Loss (8,90 ct)
+              Stop-Loss Linie
             </span>
           </div>
         </div>
