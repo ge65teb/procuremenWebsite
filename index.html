@@ -397,27 +397,42 @@ const SCENARIOS = {
 ═══════════════════════════════════════════ */
 const CRISIS_DATA = (() => {
   const rng = makeRng(42);
-  const N = 340;
-  // Waypoints: [day, blue, orange, green]
+  const N = 340; // Mar 1, 2022 – Jan 31, 2023
+
+  // Precise waypoints from image reading: [day, blue, orange(SL), green(TP)]
+  // blue  = Terminmarktpreis  (volatile)
+  // orange = Stop-Loss        (smooth trailing band, follows market up)
+  // green  = Take-Profit      (ecoplanet avg; drops Apr–May, recovers Jul–Aug,
+  //                            crashes Sep 26, jumps Oct, declines through Feb)
   const wp = [
-    [0,   95,  101,  85],
-    [31,  130, 130,  70],
-    [61,  168, 155,  52],
-    [92,  138, 168,  78],
-    [122, 148, 175, 112],
-    [153, 158, 182, 125],
-    [185, 208, 205, 130], // E1: blue crosses above Stop-Loss
-    [200, 258, 248, 132],
-    [209, 282, 265, 105], // E2: Nord Stream II (Sep 26)
-    [215, 200, 195,  68],
-    [220, 188, 190, 185],
-    [225, 175, 182, 184], // E3: blue drops below Stop-Loss
-    [245, 168, 188, 175],
-    [275, 172, 195, 167],
-    [306, 155, 200, 163],
-    [315, 160, 201, 162], // E4: blue crosses below Take-Profit
-    [337, 135, 203, 125],
+    [0,   96,  100,  84],  // Mar 1
+    [20,  112, 112,  76],  // Mar 21
+    [31,  140, 132,  67],  // Apr 1
+    [61,  165, 158,  52],  // May 1 – green at trough
+    [76,  155, 165,  58],  // May 16
+    [92,  133, 170,  80],  // Jun 1 – blue dips
+    [107, 148, 174,  95],  // Jun 16
+    [122, 150, 178, 113],  // Jul 1
+    [137, 162, 182, 120],  // Jul 16
+    [153, 170, 188, 126],  // Aug 1
+    [168, 192, 198, 130],  // Aug 16
+    [184, 218, 215, 132],  // Sep 1
+    [196, 255, 248, 133],  // Sep 13
+    [205, 278, 260, 120],  // Sep 22
+    [209, 282, 265,  68],  // Sep 26 = E2 (Nord Stream – green crashes)
+    [213, 215, 205,  66],  // Sep 30 – blue drops fast
+    [219, 188, 190, 186],  // Oct 6  – green jumps (market reset)
+    [225, 176, 183, 184],  // Oct 12 = E3 (blue below SL)
+    [245, 168, 190, 175],  // Nov 1
+    [260, 172, 193, 170],  // Nov 16
+    [275, 174, 197, 167],  // Dec 1
+    [290, 170, 200, 165],  // Dec 16
+    [306, 150, 202, 163],  // Jan 1 2023
+    [315, 158, 203, 162],  // Jan 10 = E4 (blue near green)
+    [325, 142, 204, 148],  // Jan 20
+    [337, 133, 205, 123],  // Jan 31
   ];
+
   const lerp = (a,b,t) => a+(b-a)*t;
   const interp = (day, col) => {
     for (let j=0; j<wp.length-1; j++) {
@@ -428,22 +443,25 @@ const CRISIS_DATA = (() => {
     }
     return wp[wp.length-1][col];
   };
+
   const blue=[], orange=[], green=[], labels=[];
   const start = new Date(2022,2,1);
   for (let i=0; i<N; i++) {
     const d = new Date(start); d.setDate(start.getDate()+i);
     const mo=['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'][d.getMonth()];
     labels.push(`${d.getDate()}. ${mo} '${String(d.getFullYear()).slice(2)}`);
-    blue.push(  +(interp(i,1)+(rng()-0.5)*20).toFixed(1));
-    orange.push(+(interp(i,2)+(rng()-0.5)*5 ).toFixed(1));
-    green.push( +(interp(i,3)+(rng()-0.5)*10).toFixed(1));
+    blue.push(  +(interp(i,1)+(rng()-0.5)*18).toFixed(1));
+    orange.push(+(interp(i,2)+(rng()-0.5)*4 ).toFixed(1));
+    green.push( +(interp(i,3)+(rng()-0.5)*8 ).toFixed(1));
   }
-  // Force exact crossing values
-  const E1=185, E2=209, E3=225, E4=315;
-  blue[E1]=208; orange[E1]=205;
-  blue[E2]=282; orange[E2]=265;
-  blue[E3]=175; orange[E3]=182;
-  blue[E4]=160; green[E4] =162;
+
+  // Force exact event values for clean crossings
+  const E1=184, E2=209, E3=225, E4=315;
+  blue[E1]=218;  orange[E1]=215;             // E1: blue just above SL
+  blue[E2]=282;  orange[E2]=265; green[E2]=68; // E2: Nord Stream peak
+  blue[E3]=176;  orange[E3]=183;             // E3: blue just below SL
+  blue[E4]=158;  green[E4]=160;              // E4: blue just below TP
+
   return { labels, blue, orange, green, N, E1, E2, E3, E4 };
 })();
 
@@ -485,7 +503,7 @@ const CrisisChart = () => {
 
   const W=820, H=260, PAD={l:52,r:20,t:16,b:32};
   const cw=W-PAD.l-PAD.r, ch=H-PAD.t-PAD.b;
-  const yMin=40, yMax=310;
+  const yMin=40, yMax=305;
   const xOf = i => PAD.l+(i/(N-1))*cw;
   const yOf = v => PAD.t+(1-(v-yMin)/(yMax-yMin))*ch;
   const mkPath = arr => {
@@ -598,56 +616,45 @@ const CrisisChart = () => {
 const CM_DATA = (() => {
   const rng = makeRng(77);
   // 90 daily points: Jan 2 – Apr 1, 2026
-  // Blue: Terminmarktpreis, starts ~9.4, trends down to ~8.0 then spike to ~9.2
-  // Green (Take-Profit): flat at 8.02
-  // Orange (Stop-Loss): flat at 8.90
+  // Matches uploaded image: blue starts 9.4, drops to 8.02 (Feb 10), rebounds to 8.90 (Mar 8), continues to ~10.2
   const N = 90;
   const labels = [];
   const blue = [];
   const green = Array(N).fill(8.02);
   const orange = Array(N).fill(8.90);
 
-  // Build date labels Jan 2 – Apr 1
   const start = new Date(2026, 0, 2);
   for (let i = 0; i < N; i++) {
     const d = new Date(start);
     d.setDate(start.getDate() + i);
-    const mo = ['Jan','Feb','Mär','Apr'][d.getMonth() - 0 > 2 ? 3 : d.getMonth()];
+    const mo = ['Jan','Feb','Mär','Apr'][d.getMonth() > 2 ? 3 : d.getMonth()];
     labels.push(`${d.getDate()}. ${mo}`);
   }
 
-  // Generate blue line: starts 9.40, drifts with noise
-  // Must equal 8.02 at day 39 (Feb 10) and 8.90 at day 65 (Mar 8)
-  const EVENT1 = 39; // blue crosses green downward at 8.02
-  const EVENT2 = 65; // blue crosses orange upward at 8.90
+  const EVENT1 = 39; // Feb 10 – blue crosses Take-Profit (8.02)
+  const EVENT2 = 65; // Mar 8  – blue crosses Stop-Loss (8.90)
 
-  // Segment 0→EVENT1: start 9.40, end 8.02
+  // Jan 2 → Feb 10: 9.40 down to 8.02 with noise
   for (let i = 0; i <= EVENT1; i++) {
     const t = i / EVENT1;
     const base = 9.40 + (8.02 - 9.40) * t;
-    const noise = (rng() - 0.5) * 0.28;
-    blue.push(+(base + noise * (1 - t * 0.6)).toFixed(3));
+    blue.push(+(base + (rng()-0.5)*0.30*(1-t*0.5)).toFixed(3));
   }
-  // Force exact crossing
   blue[EVENT1] = 8.02;
 
-  // Segment EVENT1→EVENT2: 8.02 → 8.90 (recovery)
-  const seg2len = EVENT2 - EVENT1;
-  for (let i = 1; i < seg2len; i++) {
-    const t = i / seg2len;
-    const base = 8.02 + (8.90 - 8.02) * t;
-    const noise = (rng() - 0.5) * 0.22;
-    blue.push(+(base + noise).toFixed(3));
+  // Feb 10 → Mar 8: 8.02 recovering to 8.90
+  const seg2 = EVENT2 - EVENT1;
+  for (let i = 1; i < seg2; i++) {
+    const t = i / seg2;
+    blue.push(+(8.02 + (8.90-8.02)*t + (rng()-0.5)*0.25).toFixed(3));
   }
   blue[EVENT2] = 8.90;
 
-  // Segment EVENT2→N-1: 8.90 → ~9.20 (continues up)
-  const seg3len = N - EVENT2;
-  for (let i = 1; i < seg3len; i++) {
-    const t = i / seg3len;
-    const base = 8.90 + (9.20 - 8.90) * t;
-    const noise = (rng() - 0.5) * 0.20;
-    blue.push(+(base + noise).toFixed(3));
+  // Mar 8 → Apr 1: 8.90 rising steeply to ~10.20 (matches image)
+  const seg3 = N - EVENT2;
+  for (let i = 1; i < seg3; i++) {
+    const t = i / seg3;
+    blue.push(+(8.90 + (10.20-8.90)*t + (rng()-0.5)*0.28).toFixed(3));
   }
 
   return { labels, blue, green, orange, EVENT1, EVENT2, N };
@@ -700,18 +707,16 @@ const CurrentMarketChart = () => {
   const W = 820, H = 230, PAD = { l:50, r:20, t:16, b:32 };
   const cw = W - PAD.l - PAD.r;
   const ch = H - PAD.t - PAD.b;
-  const yMin = 7.4, yMax = 10.0;
+  const yMin = 7.4, yMax = 10.8;
   const xOf = i => PAD.l + (i / (N-1)) * cw;
   const yOf = v => PAD.t + (1 - (v - yMin)/(yMax - yMin)) * ch;
 
-  // Build visible paths (up to current step)
   const pts = (arr) => arr.slice(0, step+1).map((v,i) => `${xOf(i)},${yOf(v)}`).join(' ');
   const bluePath  = step > 0 ? `M ${pts(blue).replace(/ /g,' L ')}` : '';
   const greenPath = `M ${xOf(0)},${yOf(8.02)} L ${xOf(N-1)},${yOf(8.02)}`;
   const orangePath= `M ${xOf(0)},${yOf(8.90)} L ${xOf(N-1)},${yOf(8.90)}`;
 
-  // Grid Y lines
-  const gridYs = [8.0, 8.5, 9.0, 9.5, 10.0];
+  const gridYs = [7.5, 8.0, 8.5, 9.0, 9.5, 10.0, 10.5];
   // X-axis month ticks
   const monthTicks = [0, 30, 58, 89]; // Jan, Feb, Mar, Apr approx
   const monthNames = ['Jan', 'Feb', 'Mär', 'Apr'];
@@ -831,28 +836,8 @@ const CurrentMarketChart = () => {
 /* ═══════════════════════════════════════════
    PORTFOLIOMANAGEMENT TAB
 ═══════════════════════════════════════════ */
-const PM_COMPS = [
-  { key:'term',  label:'Terminmarkt', price:8.38, color:C.blue,    desc:'Fixe Jahreskontrakte an der EEX' },
-  { key:'spot',  label:'Spotmarkt',   price:8.21, color:C.lblue,   desc:'Day-Ahead & Intraday Handel' },
-  { key:'wind',  label:'Wind PPA',    price:7.64, color:'#0D9488', desc:'Langfristiger Windstromvertrag' },
-  { key:'solar', label:'Solar PPA',   price:6.54, color:'#16A34A', desc:'Langfristiger Solarstromvertrag' },
-];
-const OPTIMAL = { term:40, spot:30, wind:21, solar:9 };
-const MONTHLY_LOAD = [1180,1050,1080,980,920,850,830,860,960,1040,1120,1240];
-
 const PortfolioTab = () => {
   const [scenario, setScenario] = useState('crisis');
-  const [mix, setMix] = useState({ term:40, spot:30, wind:20, solar:10 });
-  const [animating, setAnimating] = useState(false);
-
-  const sum = Object.values(mix).reduce((a,b)=>a+b,0);
-  const blended = PM_COMPS.reduce((acc,c)=>acc+(mix[c.key]/Math.max(sum,1))*c.price,0);
-  const savingsPct = ((COMPANY.stromMarket - blended)/COMPANY.stromMarket*100);
-  const savingsEur = Math.round((COMPANY.stromMarket - blended)/100*COMPANY.stromMWh*1000);
-  const normPct = key => sum > 0 ? (mix[key]/sum)*100 : 0;
-
-  const applyOptimal = () => { setAnimating(true); setMix(OPTIMAL); setTimeout(()=>setAnimating(false),800); };
-  const adjust = (k,v) => setMix(p=>({...p,[k]:Math.max(0,Math.min(100,Number(v)))}));
 
   return (
     <div className="max-w-screen-xl mx-auto px-8 py-6 flex flex-col gap-5">
@@ -886,137 +871,6 @@ const PortfolioTab = () => {
             ? <CrisisChart key="crisis"/>
             : <CurrentMarketChart key="current"/>
           }
-        </div>
-      </div>
-
-      <div className="grid gap-5" style={{ gridTemplateColumns:'1fr 320px' }}>
-
-        {/* Lastgang chart */}
-        <div className="bg-white rounded-2xl border p-6" style={{ borderColor:C.lgray }}>
-          <div className="flex justify-between items-center mb-4">
-            <div>
-              <h3 className="font-bold text-sm" style={{ color:C.darkblue }}>Lastgang & Produktstrukturierung</h3>
-              <p className="text-xs mt-0.5" style={{ color:C.dgray }}>Monatlicher Verbrauch mit Produktmix</p>
-            </div>
-            <div className="flex gap-3">
-              {PM_COMPS.map(c=>(
-                <div key={c.key} className="flex items-center gap-1.5 text-xs" style={{ color:C.dgray }}>
-                  <div className="w-2.5 h-2.5 rounded-sm" style={{ background:c.color }}/>
-                  {c.label}
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="flex items-end gap-2" style={{ height:'170px' }}>
-            {MONTHLY_LOAD.map((load, mi) => (
-              <div key={mi} className="flex-1 flex flex-col justify-end" style={{ height:'100%' }}>
-                <div className="w-full rounded-t overflow-hidden flex flex-col-reverse"
-                  style={{ height:`${(load/1320)*100}%`, transition:'height 0.4s ease' }}>
-                  {PM_COMPS.map(c => {
-                    const p = normPct(c.key);
-                    return p > 0 ? <div key={c.key} style={{ height:`${p}%`, background:c.color, minHeight:'2px', transition:'height 0.4s ease' }}/> : null;
-                  })}
-                </div>
-                <div className="text-center mt-1" style={{ fontSize:'9px', color:C.dgray }}>
-                  {['J','F','M','A','M','J','J','A','S','O','N','D'][mi]}
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="mt-3">
-            <div className="text-xs font-semibold mb-1" style={{ color:C.darkblue }}>Aktuelle Produktverteilung</div>
-            <div className="flex rounded-lg overflow-hidden h-7">
-              {PM_COMPS.map(c => { const p=normPct(c.key); return p>0 ?
-                <div key={c.key} className="flex items-center justify-center text-white font-bold transition-all duration-500"
-                  style={{ flex:p, background:c.color, fontSize:p>10?'11px':'0px', minWidth:'2px' }}>
-                  {p.toFixed(0)}%
-                </div> : null;
-              })}
-            </div>
-            {sum!==100 && <div className="mt-1.5 text-xs px-2 py-1 rounded-lg inline-block" style={{ background:'#FEF9C3', color:'#854D0E' }}>Summe: {sum}% — Balken zeigt normalisierte Verteilung</div>}
-          </div>
-        </div>
-
-        {/* Result cards */}
-        <div className="flex flex-col gap-4">
-          <div className="rounded-2xl p-5 text-white" style={{ background:C.darkblue }}>
-            <div className="text-xs opacity-55 mb-1">Optimierter Arbeitspreis</div>
-            <div className="font-bold leading-none" style={{ fontSize:'2.6rem' }}>{blended.toFixed(2)}</div>
-            <div className="text-sm opacity-65 mt-0.5">ct/kWh (gewichteter Ø)</div>
-          </div>
-          <div className={`rounded-2xl p-5 ${animating?'pulse-btn':''}`} style={{ background:C.yellow }}>
-            <div className="text-xs font-semibold mb-0.5" style={{ color:C.darkblue }}>Einsparung vs. Marktpreis</div>
-            <div className="font-bold leading-none" style={{ fontSize:'2.2rem', color:C.darkblue }}>-{savingsPct.toFixed(1)}%</div>
-            <div className="text-sm font-bold mt-1" style={{ color:C.darkblue }}>≈ {savingsEur>0?savingsEur.toLocaleString('de-DE'):'0'} €/Jahr</div>
-            <div className="text-xs mt-1 opacity-60" style={{ color:C.darkblue }}>Basis: {COMPANY.stromMarket} ct/kWh Markt</div>
-          </div>
-          <div className="rounded-2xl border p-4" style={{ borderColor:C.lgray, background:'white' }}>
-            {PM_COMPS.map(c=>(
-              <div key={c.key} className="flex items-center gap-2 py-1.5 border-b last:border-0" style={{ borderColor:'#F3F4F6' }}>
-                <div className="w-2 h-2 rounded-sm flex-shrink-0" style={{ background:c.color }}/>
-                <span className="text-xs flex-1" style={{ color:'#374151' }}>{c.label}</span>
-                <span className="text-xs" style={{ color:C.dgray }}>{normPct(c.key).toFixed(1)}%</span>
-                <span className="text-xs font-semibold w-24 text-right" style={{ color:C.darkblue }}>
-                  {normPct(c.key)>0?`${((normPct(c.key)/100)*c.price).toFixed(3)} ct/kWh`:'–'}
-                </span>
-              </div>
-            ))}
-            <div className="flex justify-between pt-2 border-t mt-1" style={{ borderColor:C.lgray }}>
-              <span className="text-xs font-bold" style={{ color:C.darkblue }}>Gesamt</span>
-              <span className="text-xs font-bold" style={{ color:C.blue }}>{blended.toFixed(3)} ct/kWh</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Sliders */}
-      <div className="bg-white rounded-2xl border p-6" style={{ borderColor:C.lgray }}>
-        <div className="flex items-center justify-between mb-5">
-          <div>
-            <h3 className="font-bold text-base" style={{ color:C.darkblue }}>Produktmix konfigurieren</h3>
-            <p className="text-xs mt-0.5" style={{ color:C.dgray }}>Anteile anpassen — Preis und Chart aktualisieren sich live</p>
-          </div>
-          <button onClick={applyOptimal}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm active:scale-95 transition-transform"
-            style={{ background:C.yellow, color:C.darkblue, boxShadow:'0 2px 12px rgba(226,236,43,.45)' }}>
-            <svg width="14" height="14" viewBox="0 0 16 16"><path d="M8 1l1.8 3.6 4 .6-2.9 2.8.7 4L8 10l-3.6 1.9.7-4L2.2 5.2l4-.6z" fill={C.darkblue}/></svg>
-            Optimale Produktzusammensetzung
-          </button>
-        </div>
-        <div className="grid grid-cols-2 gap-x-12 gap-y-5">
-          {PM_COMPS.map(c=>(
-            <div key={c.key}>
-              <div className="flex justify-between items-center mb-1.5">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-sm flex-shrink-0" style={{ background:c.color }}/>
-                  <span className="text-sm font-bold" style={{ color:C.darkblue }}>{c.label}</span>
-                  <span className="text-xs" style={{ color:C.dgray }}>{c.desc}</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs" style={{ color:C.dgray }}>{c.price} ct/kWh</span>
-                  <span className="text-sm font-bold w-12 text-right" style={{ color:c.color }}>{mix[c.key]}%</span>
-                </div>
-              </div>
-              <input type="range" min="0" max="100" value={mix[c.key]}
-                onChange={e=>adjust(c.key,e.target.value)} className="w-full"
-                style={{ background:`linear-gradient(to right,${c.color} ${mix[c.key]}%,#E5E7EB ${mix[c.key]}%)`, accentColor:c.color }}/>
-              <div className="flex justify-between mt-0.5 text-xs" style={{ color:'#9CA3AF' }}>
-                <span>Beitrag zum Preis</span>
-                <span style={{ color:C.darkblue, fontWeight:600 }}>
-                  {normPct(c.key).toFixed(1)}% × {c.price} = {((normPct(c.key)/100)*c.price).toFixed(3)} ct/kWh
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="mt-5 pt-4 border-t flex justify-between items-center" style={{ borderColor:'#F3F4F6' }}>
-          <div className="text-xs font-bold" style={{ color:C.darkblue }}>Gewichteter Gesamtpreis</div>
-          <div>
-            <span className="font-bold" style={{ color:C.blue, fontSize:'1.05rem' }}>{blended.toFixed(3)} ct/kWh</span>
-            <span className="text-xs ml-3" style={{ color:'#16A34A', fontWeight:700 }}>
-              -{(COMPANY.stromMarket-blended).toFixed(3)} ct/kWh ({savingsPct.toFixed(1)}%)
-            </span>
-          </div>
         </div>
       </div>
     </div>
