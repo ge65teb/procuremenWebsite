@@ -18,6 +18,8 @@
     input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border-radius: 50%; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.25); }
     @keyframes pulse-yellow { 0%,100%{box-shadow:0 0 0 0 rgba(226,236,43,.5)}50%{box-shadow:0 0 0 8px rgba(226,236,43,0)}}
     .pulse-btn { animation: pulse-yellow 2s infinite; }
+    @keyframes slideInRight { from { opacity:0; transform:translateX(60px); } to { opacity:1; transform:translateX(0); } }
+    .slide-in-right { animation: slideInRight 0.4s cubic-bezier(0.16,1,0.3,1) forwards; }
   </style>
 </head>
 <body>
@@ -640,6 +642,242 @@ const ScenarioChart = ({ scenario }) => {
 };
 
 /* ═══════════════════════════════════════════
+   CURRENT MARKET CHART (Jan–Mar 2026)
+═══════════════════════════════════════════ */
+const CM_DATA = (() => {
+  const rng = makeRng(77);
+  // 90 daily points: Jan 2 – Apr 1, 2026
+  // Blue: Terminmarktpreis, starts ~9.4, trends down to ~8.0 then spike to ~9.2
+  // Green (Take-Profit): flat at 8.02
+  // Orange (Stop-Loss): flat at 8.90
+  const N = 90;
+  const labels = [];
+  const blue = [];
+  const green = Array(N).fill(8.02);
+  const orange = Array(N).fill(8.90);
+
+  // Build date labels Jan 2 – Apr 1
+  const start = new Date(2026, 0, 2);
+  for (let i = 0; i < N; i++) {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    const mo = ['Jan','Feb','Mär','Apr'][d.getMonth() - 0 > 2 ? 3 : d.getMonth()];
+    labels.push(`${d.getDate()}. ${mo}`);
+  }
+
+  // Generate blue line: starts 9.40, drifts with noise
+  // Must equal 8.02 at day 39 (Feb 10) and 8.90 at day 65 (Mar 8)
+  const EVENT1 = 39; // blue crosses green downward at 8.02
+  const EVENT2 = 65; // blue crosses orange upward at 8.90
+
+  // Segment 0→EVENT1: start 9.40, end 8.02
+  for (let i = 0; i <= EVENT1; i++) {
+    const t = i / EVENT1;
+    const base = 9.40 + (8.02 - 9.40) * t;
+    const noise = (rng() - 0.5) * 0.28;
+    blue.push(+(base + noise * (1 - t * 0.6)).toFixed(3));
+  }
+  // Force exact crossing
+  blue[EVENT1] = 8.02;
+
+  // Segment EVENT1→EVENT2: 8.02 → 8.90 (recovery)
+  const seg2len = EVENT2 - EVENT1;
+  for (let i = 1; i < seg2len; i++) {
+    const t = i / seg2len;
+    const base = 8.02 + (8.90 - 8.02) * t;
+    const noise = (rng() - 0.5) * 0.22;
+    blue.push(+(base + noise).toFixed(3));
+  }
+  blue[EVENT2] = 8.90;
+
+  // Segment EVENT2→N-1: 8.90 → ~9.20 (continues up)
+  const seg3len = N - EVENT2;
+  for (let i = 1; i < seg3len; i++) {
+    const t = i / seg3len;
+    const base = 8.90 + (9.20 - 8.90) * t;
+    const noise = (rng() - 0.5) * 0.20;
+    blue.push(+(base + noise).toFixed(3));
+  }
+
+  return { labels, blue, green, orange, EVENT1, EVENT2, N };
+})();
+
+const CurrentMarketChart = () => {
+  const [step, setStep] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const { labels, blue, green, orange, EVENT1, EVENT2, N } = CM_DATA;
+
+  useEffect(() => {
+    if (!playing) return;
+    if (step >= N - 1) { setPlaying(false); return; }
+    const t = setTimeout(() => setStep(s => s + 1), 40);
+    return () => clearTimeout(t);
+  }, [playing, step]);
+
+  // Trigger notifications at event days
+  useEffect(() => {
+    if (step === EVENT1) {
+      setNotifications(prev => prev.find(n=>n.id===1) ? prev : [...prev, {
+        id: 1,
+        color: '#166534',
+        bg: '#DCFCE7',
+        border: '#86EFAC',
+        icon: '✓',
+        title: 'Take-Profit ausgelöst',
+        msg: 'Marktpreis schneidet Take-Profit Linie — Fixierung zu 8,02 ct/kWh',
+        date: labels[EVENT1],
+      }]);
+    }
+    if (step === EVENT2) {
+      setNotifications(prev => prev.find(n=>n.id===2) ? prev : [...prev, {
+        id: 2,
+        color: '#92400E',
+        bg: '#FEF3C7',
+        border: '#FCD34D',
+        icon: '⚠',
+        title: 'Stop-Loss ausgelöst',
+        msg: 'Fixierung zum Stop-Loss zu 8,9 ct/kWh um gegen zu hohe Preissteigerungen abzusichern',
+        date: labels[EVENT2],
+      }]);
+    }
+  }, [step]);
+
+  const replay = () => { setStep(0); setNotifications([]); setPlaying(true); };
+
+  // SVG dimensions
+  const W = 820, H = 230, PAD = { l:50, r:20, t:16, b:32 };
+  const cw = W - PAD.l - PAD.r;
+  const ch = H - PAD.t - PAD.b;
+  const yMin = 7.4, yMax = 10.0;
+  const xOf = i => PAD.l + (i / (N-1)) * cw;
+  const yOf = v => PAD.t + (1 - (v - yMin)/(yMax - yMin)) * ch;
+
+  // Build visible paths (up to current step)
+  const pts = (arr) => arr.slice(0, step+1).map((v,i) => `${xOf(i)},${yOf(v)}`).join(' ');
+  const bluePath  = step > 0 ? `M ${pts(blue).replace(/ /g,' L ')}` : '';
+  const greenPath = `M ${xOf(0)},${yOf(8.02)} L ${xOf(N-1)},${yOf(8.02)}`;
+  const orangePath= `M ${xOf(0)},${yOf(8.90)} L ${xOf(N-1)},${yOf(8.90)}`;
+
+  // Grid Y lines
+  const gridYs = [8.0, 8.5, 9.0, 9.5, 10.0];
+  // X-axis month ticks
+  const monthTicks = [0, 30, 58, 89]; // Jan, Feb, Mar, Apr approx
+  const monthNames = ['Jan', 'Feb', 'Mär', 'Apr'];
+
+  return (
+    <div>
+      <div className="flex gap-5">
+        {/* Chart */}
+        <div className="flex-1 relative">
+          <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display:'block', overflow:'visible' }}>
+            {/* Grid lines */}
+            {gridYs.map(v => (
+              <g key={v}>
+                <line x1={PAD.l} y1={yOf(v)} x2={W-PAD.r} y2={yOf(v)}
+                  stroke="#E5E7EB" strokeWidth="1" strokeDasharray="4 3"/>
+                <text x={PAD.l - 6} y={yOf(v)+4} fontSize="10" fill="#9CA3AF" textAnchor="end">{v.toFixed(1)}</text>
+              </g>
+            ))}
+            {/* Month labels */}
+            {monthTicks.map((idx,i) => (
+              <text key={i} x={xOf(idx)} y={H - 4} fontSize="10" fill="#6B7280" textAnchor="middle">{monthNames[i]}</text>
+            ))}
+            {/* Static horizontal lines (always shown as guide) */}
+            <path d={greenPath}  stroke="#16A34A" strokeWidth="1.5" strokeDasharray="5 3" fill="none" opacity="0.5"/>
+            <path d={orangePath} stroke="#D97706" strokeWidth="1.5" strokeDasharray="5 3" fill="none" opacity="0.5"/>
+            {/* Labels for lines */}
+            <text x={W - PAD.r + 4} y={yOf(8.02)+4}  fontSize="9" fill="#16A34A">TP</text>
+            <text x={W - PAD.r + 4} y={yOf(8.90)+4}  fontSize="9" fill="#D97706">SL</text>
+            {/* Blue market line */}
+            {step > 0 && <path d={bluePath} stroke="#2563EB" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>}
+            {/* Event vertical markers */}
+            {step >= EVENT1 && (
+              <line x1={xOf(EVENT1)} y1={PAD.t} x2={xOf(EVENT1)} y2={H-PAD.b}
+                stroke="#16A34A" strokeWidth="1.5" strokeDasharray="3 2" opacity="0.7"/>
+            )}
+            {step >= EVENT2 && (
+              <line x1={xOf(EVENT2)} y1={PAD.t} x2={xOf(EVENT2)} y2={H-PAD.b}
+                stroke="#D97706" strokeWidth="1.5" strokeDasharray="3 2" opacity="0.7"/>
+            )}
+            {/* Current value dot */}
+            {step > 0 && (
+              <circle cx={xOf(step)} cy={yOf(blue[step])} r="4" fill="#2563EB" stroke="white" strokeWidth="2"/>
+            )}
+          </svg>
+          {/* Legend */}
+          <div className="flex gap-5 mt-1 text-xs" style={{ color:C.dgray }}>
+            <span className="flex items-center gap-1.5">
+              <span style={{ width:20, height:3, background:'#2563EB', display:'inline-block', borderRadius:2 }}/>
+              Terminmarktpreis
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span style={{ width:20, height:2, background:'#16A34A', display:'inline-block', borderRadius:2, opacity:0.8 }}/>
+              Take-Profit (8,02 ct)
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span style={{ width:20, height:2, background:'#D97706', display:'inline-block', borderRadius:2, opacity:0.8 }}/>
+              Stop-Loss (8,90 ct)
+            </span>
+          </div>
+        </div>
+
+        {/* Notifications panel */}
+        <div className="flex flex-col gap-3" style={{ width:260, minWidth:260 }}>
+          <div className="text-xs font-semibold mb-1" style={{ color:C.dgray }}>Handelssignale</div>
+          {notifications.length === 0 && (
+            <div className="rounded-lg p-3 text-xs" style={{ background:'#F9FAFB', color:'#9CA3AF', border:'1px dashed #E5E7EB' }}>
+              Signale erscheinen während der Animation…
+            </div>
+          )}
+          {notifications.map(n => (
+            <div key={n.id} className="slide-in-right rounded-xl p-4 text-xs"
+              style={{ background:n.bg, border:`1.5px solid ${n.border}` }}>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="font-bold text-sm" style={{ color:n.color }}>{n.icon}</span>
+                <span className="font-bold" style={{ color:n.color }}>{n.title}</span>
+              </div>
+              <div className="font-medium leading-snug mb-1" style={{ color:'#1F2937' }}>{n.msg}</div>
+              <div style={{ color:'#6B7280' }}>{n.date}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Controls */}
+      <div className="flex items-center gap-4 mt-4">
+        {step < N - 1 && !playing && (
+          <button onClick={() => setPlaying(true)}
+            className="px-5 py-2 rounded-lg text-sm font-semibold text-white"
+            style={{ background: C.blue }}>
+            ▶ Abspielen
+          </button>
+        )}
+        {playing && (
+          <button onClick={() => setPlaying(false)}
+            className="px-5 py-2 rounded-lg text-sm font-semibold"
+            style={{ background:'#F3F4F6', color:C.darkblue }}>
+            ⏸ Pause
+          </button>
+        )}
+        {step > 0 && (
+          <button onClick={replay}
+            className="px-5 py-2 rounded-lg text-sm font-semibold"
+            style={{ background:'#F3F4F6', color:C.darkblue }}>
+            ↺ Wiederholen
+          </button>
+        )}
+        {/* Progress bar */}
+        <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background:'#E5E7EB' }}>
+          <div className="h-full rounded-full transition-all" style={{ width:`${(step/(N-1))*100}%`, background:C.blue }}/>
+        </div>
+        <span className="text-xs" style={{ color:C.dgray }}>{labels[step] || labels[0]}</span>
+      </div>
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════
    PORTFOLIOMANAGEMENT TAB
 ═══════════════════════════════════════════ */
 const PM_COMPS = [
@@ -688,10 +926,15 @@ const PortfolioTab = () => {
               Marktfolgesystem — {SCENARIOS[scenario].title}
             </h3>
             <p className="text-xs mt-0.5" style={{ color:C.dgray }}>
-              Bollinger-Bänder basiertes Stop-Loss / Take-Profit Modell · Tranchenweiser Einkauf
+              {scenario === 'crisis'
+                ? 'Bollinger-Bänder basiertes Stop-Loss / Take-Profit Modell · Tranchenweiser Einkauf'
+                : 'EEX Terminmarkt Jan–Apr 2026 · Stop-Loss 8,90 ct/kWh · Take-Profit 8,02 ct/kWh'}
             </p>
           </div>
-          <ScenarioChart key={scenario} scenario={SCENARIOS[scenario]}/>
+          {scenario === 'crisis'
+            ? <ScenarioChart key="crisis" scenario={SCENARIOS.crisis}/>
+            : <CurrentMarketChart key="current"/>
+          }
         </div>
       </div>
 
