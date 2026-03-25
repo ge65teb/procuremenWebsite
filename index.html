@@ -16,62 +16,110 @@
     .clip-arrow { clip-path: polygon(0 0, calc(100% - 48px) 0, 100% 50%, calc(100% - 48px) 100%, 0 100%); }
     input[type=range] { -webkit-appearance: none; appearance: none; height: 6px; border-radius: 9999px; outline: none; cursor: pointer; }
     input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border-radius: 50%; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,0.25); }
-    .slide-in { animation: slideIn 0.25s ease; }
-    @keyframes slideIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
-    @keyframes pulse-yellow { 0%,100% { box-shadow: 0 0 0 0 rgba(226,236,43,0.5); } 50% { box-shadow: 0 0 0 8px rgba(226,236,43,0); } }
+    @keyframes pulse-yellow { 0%,100%{box-shadow:0 0 0 0 rgba(226,236,43,.5)}50%{box-shadow:0 0 0 8px rgba(226,236,43,0)}}
     .pulse-btn { animation: pulse-yellow 2s infinite; }
   </style>
 </head>
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useEffect, useCallback } = React;
+const { useState, useMemo, useEffect } = React;
 
-/* ── Design tokens ── */
 const C = {
-  blue:      '#1A2FEE',
-  darkblue:  '#00095B',
-  lightblue: '#7582F6',
-  yellow:    '#E2EC2B',
-  lgray:     '#AEAEAE',
-  dgray:     '#737373',
-  bg:        '#F5F6FA',
+  blue:     '#1A2FEE',
+  darkblue: '#00095B',
+  lblue:    '#7582F6',
+  yellow:   '#E2EC2B',
+  lgray:    '#AEAEAE',
+  dgray:    '#737373',
+  bg:       '#F5F6FA',
 };
 
-/* ── Company data (header constants) ── */
 const COMPANY = {
-  name:        'NORMA Group SE',
-  stromMWh:    12547,
-  gasMWh:      7000,
-  stromMarket: 10.23,
-  gasMarket:   3.50,
-  sites:       2500,
+  name: 'NORMA Group SE',
+  stromMWh: 12547, gasMWh: 7000,
+  stromMarket: 10.23, gasMarket: 3.50,
+  sites: 2500,
 };
 
-/* ═══════════════════════════════════════════
-   SHARED PRIMITIVES
-═══════════════════════════════════════════ */
-const Chip = ({ label, value, unit, color = C.darkblue, bg = '#EEF0FF' }) => (
-  <div className="flex flex-col items-start px-4 py-2 rounded-xl" style={{ background: bg }}>
-    <span className="text-xs font-medium" style={{ color: C.dgray }}>{label}</span>
-    <span className="text-sm font-bold leading-tight" style={{ color }}>
-      {value}<span className="text-xs font-normal ml-1" style={{ color: C.dgray }}>{unit}</span>
+/* ─── seeded RNG for stable data ─── */
+const makeRng = seed => {
+  let s = seed;
+  return () => { s = (s * 16807 + 0) % 2147483647; return (s - 1) / 2147483646; };
+};
+
+/* ─── 168 h weekly load profile (kW) ─── */
+const LOAD = (() => {
+  const r = makeRng(42);
+  const data = [];
+  for (let d = 0; d < 7; d++) {
+    const wd = d < 5, sat = d === 5;
+    for (let h = 0; h < 24; h++) {
+      let v;
+      if (wd) {
+        if      (h < 5)            v = 170 + r()*55;
+        else if (h === 5)          v = 170 + r()*55 + (r()*200);
+        else if (h === 6)          v = 600 + r()*180;
+        else if (h >= 7 && h < 8)  v = 850 + r()*120;
+        else if (h >= 8 && h < 17) v = 870 + r()*220 + Math.sin(h*0.9)*40;
+        else if (h === 17)         v = 700 + r()*120;
+        else if (h === 18)         v = 280 + r()*80;
+        else                       v = 180 + r()*55;
+      } else if (sat) {
+        if      (h >= 6  && h < 7 ) v = 250 + r()*80;
+        else if (h >= 7  && h < 13) v = 320 + r()*130;
+        else if (h === 13)           v = 220 + r()*60;
+        else if (h >= 14 && h < 17) v = 210 + r()*80;
+        else                         v = 140 + r()*45;
+      } else {
+        v = 115 + r()*60 + (h >= 9 && h < 15 ? 40 + r()*30 : 0);
+      }
+      data.push(Math.max(100, Math.round(v)));
+    }
+  }
+  return data;
+})();
+
+/* ─── product max capacities (kW) ─── */
+const BASE_MAX = 240;
+const PEAK_MAX = 760;
+const WIND_MAX = 400;
+const PV_MAX   = 330;
+
+/* ─── normalised product shape profiles (0–1 per hour) ─── */
+const PROFILES = (() => {
+  const rw = makeRng(7);
+  const base = LOAD.map(() => 1);
+  const peak = LOAD.map((_, i) => {
+    const d = Math.floor(i / 24), h = i % 24;
+    return d < 5 && h >= 7 && h < 17 ? 1 : 0;
+  });
+  const wind = LOAD.map((_, i) => {
+    const t = i;
+    const raw = 0.5
+      + 0.22 * Math.sin(t * 0.18)
+      + 0.18 * Math.cos(t * 0.31)
+      + 0.12 * Math.sin(t * 0.07)
+      + 0.08 * Math.cos(t * 0.55)
+      + (rw() - 0.5) * 0.15;
+    return Math.max(0.05, Math.min(1, raw));
+  });
+  const pv = LOAD.map((_, i) => {
+    const h = i % 24;
+    if (h < 5 || h > 20) return 0;
+    const angle = (h - 5) / 15;
+    return Math.max(0, Math.sin(angle * Math.PI) ** 1.2);
+  });
+  return { base, peak, wind, pv };
+})();
+
+/* ─── Chip ─── */
+const Chip = ({ label, value, unit }) => (
+  <div className="flex flex-col px-3 py-1.5 rounded-xl" style={{ background: 'rgba(255,255,255,0.09)' }}>
+    <span className="text-xs" style={{ color: 'rgba(255,255,255,0.5)' }}>{label}</span>
+    <span className="text-sm font-bold text-white leading-tight">
+      {value}<span className="text-xs font-normal ml-1" style={{ color: 'rgba(255,255,255,0.5)' }}>{unit}</span>
     </span>
-  </div>
-);
-
-const Bullet = ({ children, color = C.blue }) => (
-  <div className="flex items-start gap-2 text-sm leading-snug mb-2">
-    <span className="mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: color }}/>
-    <span dangerouslySetInnerHTML={{ __html: children }}/>
-  </div>
-);
-
-const KpiCard = ({ num, label, desc, small }) => (
-  <div className="rounded-xl p-4 text-white" style={{ background: C.blue }}>
-    <div className={`font-bold leading-none ${small ? 'text-3xl' : 'text-4xl'}`}>{num}</div>
-    <div className="font-semibold text-xs mt-2">{label}</div>
-    {desc && <div className="text-xs mt-1 opacity-75 leading-snug">{desc}</div>}
   </div>
 );
 
@@ -80,35 +128,25 @@ const KpiCard = ({ num, label, desc, small }) => (
 ═══════════════════════════════════════════ */
 const Header = ({ tab, setTab }) => (
   <header className="sticky top-0 z-50 border-b" style={{ background: C.darkblue, borderColor: '#0d1e4a' }}>
-    {/* Top row */}
-    <div className="max-w-screen-xl mx-auto px-8 flex items-center justify-between" style={{ height: '64px' }}>
-      {/* Brand */}
+    <div className="max-w-screen-xl mx-auto px-8 flex items-center justify-between" style={{ height: '60px' }}>
       <div className="flex items-center gap-4">
-        <span className="text-white font-bold text-xl tracking-tight" style={{ letterSpacing: '-0.5px' }}>ecoplanet</span>
-        <div className="w-px h-6 bg-white opacity-20"/>
-        <span className="text-white text-sm font-medium opacity-80">{COMPANY.name}</span>
+        <span className="text-white font-bold text-lg" style={{ letterSpacing: '-0.5px' }}>ecoplanet</span>
+        <div className="w-px h-5 bg-white opacity-20"/>
+        <span className="text-sm font-medium" style={{ color: 'rgba(255,255,255,0.75)' }}>{COMPANY.name}</span>
       </div>
-
-      {/* KPIs */}
       <div className="flex items-center gap-2">
-        <Chip label="Strom Verbrauch"   value={COMPANY.stromMWh.toLocaleString('de-DE')} unit="MWh/a" bg="rgba(255,255,255,0.08)" color="white"/>
-        <Chip label="Gas Verbrauch"     value={COMPANY.gasMWh.toLocaleString('de-DE')}  unit="MWh/a" bg="rgba(255,255,255,0.08)" color="white"/>
-        <Chip label="Marktpreis Strom"  value={COMPANY.stromMarket} unit="ct/kWh" bg="rgba(255,255,255,0.08)" color="white"/>
-        <Chip label="Marktpreis Gas"    value={COMPANY.gasMarket}   unit="ct/kWh" bg="rgba(255,255,255,0.08)" color="white"/>
-        <Chip label="Standorte"         value={COMPANY.sites.toLocaleString('de-DE')} unit="" bg="rgba(255,255,255,0.08)" color="white"/>
+        <Chip label="Strom"         value={COMPANY.stromMWh.toLocaleString('de-DE')} unit="MWh/a"/>
+        <Chip label="Gas"           value={COMPANY.gasMWh.toLocaleString('de-DE')}  unit="MWh/a"/>
+        <Chip label="Markt Strom"   value={COMPANY.stromMarket} unit="ct/kWh"/>
+        <Chip label="Markt Gas"     value={COMPANY.gasMarket}   unit="ct/kWh"/>
+        <Chip label="Standorte"     value={COMPANY.sites.toLocaleString('de-DE')} unit=""/>
       </div>
     </div>
-
-    {/* Tab row */}
-    <div className="max-w-screen-xl mx-auto px-8 flex gap-1 pb-0">
+    <div className="max-w-screen-xl mx-auto px-8 flex gap-1">
       {['Strategie', 'Portfoliomanagement'].map(t => (
         <button key={t} onClick={() => setTab(t)}
           className="px-6 py-2.5 text-sm font-semibold rounded-t-lg transition-all"
-          style={{
-            background: tab === t ? C.bg : 'transparent',
-            color: tab === t ? C.darkblue : 'rgba(255,255,255,0.6)',
-            borderBottom: tab === t ? `2px solid ${C.bg}` : '2px solid transparent',
-          }}>
+          style={{ background: tab===t ? C.bg : 'transparent', color: tab===t ? C.darkblue : 'rgba(255,255,255,0.55)', borderBottom: tab===t ? `2px solid ${C.bg}` : '2px solid transparent' }}>
           {t}
         </button>
       ))}
@@ -117,451 +155,227 @@ const Header = ({ tab, setTab }) => (
 );
 
 /* ═══════════════════════════════════════════
-   STRATEGIE TAB — slide deck
+   STRATEGIE TAB — interactive Lastgang
 ═══════════════════════════════════════════ */
+const PRODUCTS = [
+  { key:'base',  label:'Base',     color:C.darkblue, fillColor:'#1a3a8a', desc:'Durchgängiges Grundlastband (24/7)', max:BASE_MAX },
+  { key:'peak',  label:'Peak',     color:C.blue,     fillColor:C.blue,    desc:'Wochentage Mo–Fr, 07:00–17:00 Uhr', max:PEAK_MAX },
+  { key:'wind',  label:'Wind PPA', color:'#0D9488',  fillColor:'#0D9488', desc:'Variables Windstromprofil (24/7)', max:WIND_MAX },
+  { key:'pv',    label:'PV-PPA',   color:'#16A34A',  fillColor:'#16A34A', desc:'Tägliches Sonnenstrahlungsprofil', max:PV_MAX   },
+];
 
-/* Shared slide frame */
-const Slide = ({ title, sub, children, badge, noEp }) => (
-  <div className="w-full aspect-video border rounded-xl flex flex-col overflow-hidden bg-white slide-in"
-    style={{ borderColor: C.lgray }}>
-    {/* Fixed-height title area */}
-    <div className="flex items-start justify-between gap-4 flex-shrink-0 px-10 pt-8" style={{ minHeight: '88px' }}>
-      <div className="flex-1">
-        {sub && <div className="text-xs font-medium mb-1" style={{ color: C.dgray }}>{sub}</div>}
-        <h2 className="text-2xl font-semibold leading-tight" style={{ color: C.darkblue, maxWidth: '80%' }}>{title}</h2>
-      </div>
-      {!noEp && <div className="rounded px-2.5 py-1 text-xs font-bold text-white flex-shrink-0" style={{ background: C.blue }}>ep</div>}
-    </div>
-    {/* Content */}
-    <div className="flex-1 flex flex-col px-10 pb-8 overflow-hidden">{children}</div>
-  </div>
-);
+const StrategieTab = () => {
+  const [sliders, setSliders] = useState({ base:60, peak:65, wind:40, pv:30 });
 
-/* Navy slide */
-const NavySlide = ({ children }) => (
-  <div className="w-full aspect-video border rounded-xl relative overflow-hidden flex flex-col slide-in"
-    style={{ background: C.darkblue, borderColor: '#0d1e4a' }}>
-    {children}
-  </div>
-);
+  /* SVG layout constants */
+  const W=900, H=280, PL=46, PB=32, PT=14, PR=10;
+  const CW = W-PL-PR, CH = H-PT-PB;
+  const YMAX = 1450;
+  const xp = i  => PL + (i / (LOAD.length - 1)) * CW;
+  const yp = v  => PT + CH - (v / YMAX) * CH;
+  const yBottom = PT + CH;
 
-/* ── Individual slides ── */
-const S1 = () => (
-  <NavySlide>
-    <div className="absolute top-8 right-10 text-white font-semibold text-sm opacity-90">ecoplanet</div>
-    <div className="absolute left-12 top-1/2 -translate-y-1/2 font-thin select-none" style={{ fontSize: '10rem', color: 'rgba(255,255,255,0.1)', lineHeight: 1 }}>{`{`}</div>
-    <div className="absolute right-12 top-1/2 -translate-y-1/2 font-thin select-none" style={{ fontSize: '10rem', color: 'rgba(255,255,255,0.1)', lineHeight: 1 }}>{`}`}</div>
-    <div className="absolute" style={{ left: '160px', top: '50%', transform: 'translateY(-50%)' }}>
-      <div className="text-white font-bold mb-4" style={{ fontSize: '3.5rem', letterSpacing: '-2px', lineHeight: 1 }}>ecoplanet</div>
-      <div className="text-white text-lg opacity-80 leading-relaxed">Langfristige Kostenreduktion<br/>durch Optimierung der Energiepreise</div>
-      <div className="text-white text-sm mt-4 opacity-55">{COMPANY.name}</div>
-    </div>
-    <div className="absolute bottom-8 left-10 text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>München · 2026</div>
-  </NavySlide>
-);
+  /* Compute stacks */
+  const stacks = useMemo(() => {
+    const sf = { base:sliders.base/100, peak:sliders.peak/100, wind:sliders.wind/100, pv:sliders.pv/100 };
+    return LOAD.map((load, i) => {
+      const s1 = Math.min(sf.base * BASE_MAX * PROFILES.base[i], load);
+      const s2 = Math.min(s1 + sf.peak * PEAK_MAX * PROFILES.peak[i], load);
+      const s3 = Math.min(s2 + sf.wind * WIND_MAX * PROFILES.wind[i], load);
+      const s4 = Math.min(s3 + sf.pv * PV_MAX * PROFILES.pv[i], load);
+      return [0, s1, s2, s3, s4, load];
+    });
+  }, [sliders]);
 
-const S2 = () => {
-  const clients = ['DURotherm','aco','vosla','SCHMEES cast','Wuppermann','Alloheim','Azurit','Schoeller Allibert','Müller | Lila Logistik','SLG','burgbad','schattdecor','Leipfinger Bader'];
+  /* Build SVG area path between two value arrays */
+  const areaPath = (top, bot) => {
+    let d = `M${xp(0).toFixed(1)},${yp(top[0]).toFixed(1)}`;
+    for (let i=1;i<top.length;i++) d += ` L${xp(i).toFixed(1)},${yp(top[i]).toFixed(1)}`;
+    for (let i=top.length-1;i>=0;i--) d += ` L${xp(i).toFixed(1)},${yp(bot[i]).toFixed(1)}`;
+    return d + ' Z';
+  };
+
+  /* Load curve polyline */
+  const loadLine = LOAD.map((v,i) => `${i===0?'M':'L'}${xp(i).toFixed(1)},${yp(v).toFixed(1)}`).join(' ');
+
+  /* Day markers */
+  const DAY_LABELS = ['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag'];
+  const dayX = d => xp(d * 24);
+  const dayMidX = d => xp(d * 24 + 12);
+
+  /* Y gridlines */
+  const Y_GRID = [0, 350, 700, 1050, 1400];
+
+  /* Coverage stats */
+  const coverage = useMemo(() => {
+    const totLoad = LOAD.reduce((a,b) => a+b, 0);
+    const sf = { base:sliders.base/100, peak:sliders.peak/100, wind:sliders.wind/100, pv:sliders.pv/100 };
+    const keys = ['base','peak','wind','pv'];
+    const profs = [PROFILES.base, PROFILES.peak, PROFILES.wind, PROFILES.pv];
+    const maxes = [BASE_MAX, PEAK_MAX, WIND_MAX, PV_MAX];
+    return keys.map((k,idx) => {
+      const total = LOAD.reduce((acc, load, i) => acc + Math.min(sf[k] * maxes[idx] * profs[idx][i], load), 0);
+      return (total / totLoad * 100).toFixed(1);
+    });
+  }, [sliders]);
+
+  const setSlider = (key, val) => setSliders(p => ({ ...p, [key]: Number(val) }));
+
   return (
-    <Slide title="Mit der Energiebeschaffung über ecoplanet sparen Unternehmen im Schnitt 13,9% ihrer Energiekosten">
-      <div className="flex-1 grid grid-cols-2 gap-6">
-        <div className="flex flex-col gap-3">
-          {[{n:'14',l:'Ersparnis in % · 2025',light:true},{n:'12',l:'Durchschn. Verbrauch in GWh'},{n:'100+',l:'Jährliche Ersparnis in k€'}].map(s=>(
-            <div key={s.n} className="flex-1 rounded-xl p-4" style={{ background: s.light ? '#C5CEFF' : C.blue }}>
-              <div className="font-bold" style={{ fontSize: '2.4rem', color: s.light ? C.darkblue : '#fff', lineHeight: 1 }}>{s.n}</div>
-              <div className="text-xs mt-1.5" style={{ color: s.light ? C.darkblue : 'rgba(255,255,255,0.8)' }}>{s.l}</div>
-            </div>
-          ))}
-        </div>
-        <div>
-          <div className="font-semibold text-sm mb-1" style={{ color: C.darkblue }}>In Summe verwalten wir &gt;5 TWh an 2.500 Standorten</div>
-          <div className="text-xs mb-3" style={{ color: C.dgray }}>Auszug einzelner Referenzen</div>
-          <div className="grid grid-cols-4 gap-1.5">
-            {clients.map(c => <div key={c} className="bg-gray-100 rounded px-2 py-1.5 text-xs font-semibold text-center leading-tight" style={{ color: C.darkblue }}>{c}</div>)}
-          </div>
-        </div>
-      </div>
-    </Slide>
-  );
-};
+    <div className="max-w-screen-xl mx-auto px-8 py-5 flex flex-col gap-5">
 
-const S3 = () => (
-  <Slide title="Deep Dive Energieeinkauf — Arbeitspreis und Versorgeraufschlag als mögliche Hebel">
-    <div className="font-bold text-xs mb-2" style={{ color: C.darkblue }}>Zusammensetzung Ihres Strompreises</div>
-    <div className="flex rounded-lg overflow-hidden h-10 mb-1">
-      {[['Arbeitspreis',5,C.blue,'#fff'],['Versorger-gebühren',1.5,C.lightblue,'#fff'],['Steuern & Abgaben',1.5,'#9CA3AF','#fff'],['Netz-entgelte',1.5,'#D1D5DB',C.darkblue]].map(([l,f,bg,tc])=>(
-        <div key={l} className="flex items-center justify-center text-center font-bold px-2 leading-tight" style={{ flex:f, background:bg, color:tc, fontSize:'10px' }}>{l}</div>
-      ))}
-    </div>
-    <div className="flex mb-4">
-      {[['großes Optimierungspotenzial über verbesserte Tranchenfixierungen, PPAs, etc.',5,C.blue],['Verbesserungspotenzial über verbesserte Konditionen',1.5,C.lightblue],['Steuern & Abgaben vorgegeben – Gebührenunterschiede minimal',3,'#9CA3AF']].map(([t,f,bc])=>(
-        <div key={t} className="text-xs leading-snug pt-2 pr-3" style={{ flex:f, borderTop:`3px solid ${bc}`, color:'#374151' }}>{t}</div>
-      ))}
-    </div>
-    <div className="rounded-lg p-3 text-sm font-semibold text-white text-center mt-auto" style={{ background: C.darkblue }}>
-      Die Verbesserung von Arbeitspreis und Versorgergebühren lohnt sich insbesondere bei gebündelten Energiekosten.
-    </div>
-  </Slide>
-);
-
-const S4 = () => {
-  const steps = [
-    { title:'Lastganganalyse', bullets:['Auswertung der <strong>historischen Verbrauchsdaten</strong>','Modellierung <strong>individueller Anforderungen</strong>'],
-      chart: <svg viewBox="0 0 120 60" className="w-full h-full">{[30,45,60,75,90,100,85,70,55,65,80,60,40].map((h,i)=><rect key={i} x={i*9} y={60-h*0.6} width={7} height={h*0.6} rx={1} fill="rgba(255,255,255,0.85)"/>)}</svg> },
-    { title:'Strategieentwicklung', bullets:['<strong>Kostenoptimierung</strong> bei Minimierung des Spotanteils','Entwicklung Ihrer <strong>idealen Produktkombination</strong>'],
-      chart: <svg viewBox="0 0 120 60" className="w-full h-full">{[85,70,90,55,80,65,75,85,60,75,80,70,65].map((h,i)=><rect key={i} x={i*9} y={60-h*0.6} width={7} height={h*0.6} rx={1} fill="rgba(255,255,255,0.7)"/>)}</svg> },
-    { title:'Portfoliomanagement', light:true, bullets:['Nutzung von mehreren <strong>Perioden zur Beschaffung</strong>','Ausspielung von Kaufsignalen anhand <strong>Bollinger-Bänder</strong>'],
-      chart: <svg viewBox="0 0 120 60" className="w-full h-full"><polyline points="0,50 20,35 40,42 60,20 80,28 100,18 120,22" fill="none" stroke={C.blue} strokeWidth="2"/><polyline points="0,55 20,48 40,52 60,38 80,45 100,30 120,40" fill="none" stroke="#FF8C00" strokeWidth="1.5" strokeDasharray="3,2"/></svg> },
-  ];
-  return (
-    <Slide title="Energiebeschaffung mit ecoplanet: In drei einfachen Schritten zur Kostenoptimierung">
-      <div className="flex-1 grid grid-cols-3 gap-4">
-        {steps.map(s => (
-          <div key={s.title} className="rounded-xl overflow-hidden flex flex-col">
-            <div className="py-2.5 px-4 text-center font-bold text-sm" style={{ background: s.light ? '#E8ECFF' : C.blue, color: s.light ? C.darkblue : '#fff' }}>{s.title}</div>
-            <div className="flex-1 p-4" style={{ background: s.light ? '#E8ECFF' : C.blue }}>
-              <div className="rounded-lg bg-white bg-opacity-90 h-20 mb-3 p-2 flex items-end gap-0.5 overflow-hidden">{s.chart}</div>
-              {s.bullets.map((b,i) => <Bullet key={i} color={s.light ? C.darkblue : 'rgba(255,255,255,0.9)'}>{b}</Bullet>)}
-            </div>
+      {/* Chart card */}
+      <div className="bg-white rounded-2xl border" style={{ borderColor: C.lgray }}>
+        <div className="px-6 pt-5 pb-2 flex items-start justify-between">
+          <div>
+            <div className="text-xs font-medium" style={{ color: C.dgray }}>Netzbezug (Hauptwerk)</div>
+            <div className="text-xs mt-0.5" style={{ color: '#9CA3AF' }}>kW · Durchschnittliche Woche</div>
           </div>
-        ))}
-      </div>
-    </Slide>
-  );
-};
-
-const SavingsSlide = ({ title, sub, badge, vol, current, currentLbl, optimized, optimizedLbl, mix, note }) => (
-  <Slide title={title} sub={sub}>
-    <div className="flex-1 grid grid-cols-2 gap-8">
-      <div>
-        <div className="rounded-xl p-4 mb-4" style={{ background: '#EEF1FF' }}>
-          <div className="font-bold text-lg" style={{ color: C.blue }}>Einsparungen &nbsp;{badge}</div>
-          <div className="text-xs mt-0.5" style={{ color: C.dgray }}>{vol}</div>
-        </div>
-        <div className="flex items-end gap-4" style={{ height:'140px' }}>
-          <div className="flex flex-col items-center gap-1.5">
-            <div className="w-14 rounded-t-lg flex items-start justify-center pt-2 text-white text-xs font-bold" style={{ background:'#9CA3AF', height:'130px' }}>{current}</div>
-            <div className="text-xs text-center leading-tight" style={{ color:C.dgray, maxWidth:'70px' }}>{currentLbl}</div>
-          </div>
-          <div className="text-2xl font-bold mb-14" style={{ color:C.darkblue }}>→</div>
-          <div className="flex flex-col items-center gap-1.5">
-            <div className="w-14 rounded-t-lg flex items-start justify-center pt-2 text-white text-xs font-bold" style={{ background:C.blue, height:'100px' }}>{optimized}</div>
-            <div className="text-xs text-center font-bold leading-tight" style={{ color:C.blue, maxWidth:'70px' }}>{optimizedLbl}</div>
-          </div>
-        </div>
-        <div className="text-xs mt-1" style={{ color:C.dgray }}>ct/kWh</div>
-      </div>
-      <div>
-        <div className="font-bold text-sm mb-3" style={{ color:C.darkblue }}>So setzt sich Ihr optimierter Preis zusammen</div>
-        <div className="flex flex-col gap-3">
-          {mix.map(m => (
-            <div key={m.l} className="flex items-center gap-3">
-              <span className="text-sm font-bold w-9 flex-shrink-0" style={{ color:C.darkblue }}>{m.p}</span>
-              <div className="flex-1 h-8 rounded-md overflow-hidden bg-gray-100">
-                <div className="h-full rounded-md flex items-center pl-3 text-white text-xs font-bold" style={{ background:m.c, width:m.p }}>{m.l}</div>
+          <div className="flex items-center gap-5">
+            {PRODUCTS.map(p => (
+              <div key={p.key} className="flex items-center gap-1.5 text-xs" style={{ color: C.dgray }}>
+                <div className="w-3 h-3 rounded-sm" style={{ background: p.fillColor, opacity: 0.8 }}/>
+                {p.label}
               </div>
-              <span className="text-xs font-bold w-20 text-right" style={{ color:C.darkblue }}>{m.v}</span>
+            ))}
+            <div className="flex items-center gap-1.5 text-xs" style={{ color: '#9CA3AF' }}>
+              <div className="w-3 h-3 rounded-sm bg-gray-200"/>
+              Ungedeckt
             </div>
-          ))}
-        </div>
-        {note && <div className="mt-3 inline-block border rounded px-3 py-1.5 text-xs font-bold" style={{ borderColor:C.blue, color:C.blue }}>{note}</div>}
-      </div>
-    </div>
-  </Slide>
-);
-
-const S5 = () => <SavingsSlide title="Analyse Lastgang — Produktzusammensetzung für optimalen Arbeitspreis" badge="-20,33%" vol="260.978 € / 12.547 MWh" current="10,23" currentLbl="Marktpreis Strom Jan 2026" optimized="8,15" optimizedLbl="Optimierter Preis 2027" mix={[{l:'Terminmarkt',p:'40%',c:C.blue,v:'8,38 ct/kWh'},{l:'Spot',p:'30%',c:C.lightblue,v:'8,21 ct/kWh'},{l:'PPAs',p:'30%',c:'#22C55E',v:'7,80 ct/kWh'}]} note="+ Versorgeraufschlag 0,30 ct/kWh"/>;
-const S6 = () => <SavingsSlide title="Ihre optimierten Kosten für Gas — Zusammensetzung basiert auf Lastganganalyse" badge="-19,7%" vol="48.300 € / 7.000 MWh" current="3,50" currentLbl="Marktpreis Gas Jan 2026" optimized="2,81" optimizedLbl="Optimierter Preis 2027" mix={[{l:'Terminmarkt',p:'80%',c:C.blue,v:'2,81 ct/kWh'},{l:'Spot',p:'20%',c:C.lightblue,v:'2,79 ct/kWh'}]} note="+ Versorgeraufschlag 0,24 ct/kWh"/>;
-
-const S7 = () => {
-  const rows = [['Vorhersagbarkeit','88,5%'],['Peak-Anteil','44,0%'],['Profilkosten','4,0%'],['PPA Wind-Fit','81,2%'],['PPA Solar-Fit','56,0%']];
-  return (
-    <Slide title="Ihr Lastgang und verbundene Einblicke — Basis für Ihren individuellen Produktmix">
-      <div className="flex-1 grid gap-5" style={{ gridTemplateColumns:'1.4fr 1fr' }}>
-        <div className="rounded-xl border p-4 flex flex-col" style={{ borderColor:C.lgray }}>
-          <div className="text-xs font-semibold italic mb-2" style={{ color:C.darkblue }}>Ihr Lastgang (Durchschnittliche Woche)</div>
-          <div className="flex-1 rounded-lg overflow-hidden" style={{ background:'#F9FAFB' }}>
-            <svg viewBox="0 0 280 100" className="w-full h-full" preserveAspectRatio="none">
-              <rect x="0" y="55" width="280" height="45" fill="#0D9488" opacity="0.55"/>
-              <path d="M0,90 Q70,78 140,82 Q210,86 280,80" fill={C.blue} opacity="0.45"/>
-              <polyline points="0,50 25,42 50,47 75,32 100,38 125,28 150,34 175,25 200,38 225,30 250,44 280,36" fill="none" stroke={C.darkblue} strokeWidth="2"/>
-            </svg>
           </div>
         </div>
-        <div className="rounded-xl p-5 text-white flex flex-col" style={{ background:C.blue }}>
-          <div className="font-bold text-sm mb-3">Unsere gewonnenen Einblicke</div>
-          {rows.map(([l,v]) => (
-            <div key={l} className="flex justify-between items-center py-2.5 border-b border-white border-opacity-20 last:border-0">
-              <span className="text-sm opacity-90">{l}</span>
-              <span className="text-base font-bold">{v}</span>
-            </div>
+
+        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ display:'block' }}>
+          {/* Horizontal grid lines */}
+          {Y_GRID.map(v => (
+            <g key={v}>
+              <line x1={PL} y1={yp(v)} x2={W-PR} y2={yp(v)} stroke="#F3F4F6" strokeWidth="1"/>
+              <text x={PL-5} y={yp(v)+3.5} textAnchor="end" fontSize="9" fill="#9CA3AF">{v}</text>
+            </g>
           ))}
-        </div>
-      </div>
-    </Slide>
-  );
-};
 
-const S8 = () => (
-  <Slide title="Balance von Risiken & Chancen — Elemente der Handelsstrategie">
-    <div className="flex-1 grid grid-cols-2 gap-5">
-      <div>
-        <Bullet><strong>Reduktion von Markt-Timing Risiken</strong> durch Aufteilung der Mengen in mehrere Tranchen</Bullet>
-        <Bullet><strong>Ermittlung optimaler Kaufzeitpunkte</strong> durch Stop-Loss / Take-Profit Modell (Bollinger-Bänder)</Bullet>
-        <div className="rounded-xl border p-3 mt-3" style={{ borderColor:C.lgray }}>
-          <div className="text-xs font-bold mb-2" style={{ color:C.darkblue }}>Stop-Loss · Take-Profit</div>
-          <div className="rounded-lg overflow-hidden" style={{ height:'80px', background:'#F3F4F6', position:'relative' }}>
-            <svg viewBox="0 0 200 70" className="w-full h-full">
-              <path d="M0,55 Q50,18 100,35 Q150,55 200,28" fill="none" stroke="#FF8C00" strokeWidth="2"/>
-              <path d="M0,60 Q50,50 100,55 Q150,60 200,50" fill="none" stroke={C.blue} strokeWidth="1.5" strokeDasharray="4,2"/>
-              <path d="M0,30 Q50,12 100,22 Q150,32 200,14" fill="none" stroke="#9CA3AF" strokeWidth="1" strokeDasharray="3,3"/>
-              <circle cx="58" cy="30" r="6" fill={C.blue}/>
-              <text x="55" y="34" fill="white" fontSize="7" fontWeight="bold">1</text>
-              <circle cx="148" cy="50" r="6" fill={C.blue}/>
-              <text x="145" y="54" fill="white" fontSize="7" fontWeight="bold">2</text>
-            </svg>
-            <div className="absolute top-1 left-1 text-xs font-semibold px-1.5 py-0.5 rounded" style={{ background:C.yellow, color:C.darkblue, fontSize:'9px' }}>Stop-Loss ↑</div>
-            <div className="absolute bottom-1 left-1 text-xs font-semibold px-1.5 py-0.5 rounded" style={{ background:C.yellow, color:C.darkblue, fontSize:'9px' }}>Take-Profit ↓</div>
-          </div>
-        </div>
-      </div>
-      <div className="rounded-xl p-4 text-white flex flex-col gap-3" style={{ background:C.blue }}>
-        <div>
-          <div className="font-bold text-sm">Real-Beispiel: DEB CAL-23</div>
-          <div className="text-xs opacity-65">Jahresprodukt Base '23</div>
-        </div>
-        <div className="rounded-lg p-3 text-sm" style={{ background:'rgba(255,255,255,0.12)' }}>
-          <div className="font-bold mb-1">26.09.2022 – Explosion Nord Stream II</div>
-          <div className="text-xs opacity-85">Direkte Fixierung auf Grund von Stop-Loss</div>
-        </div>
-        <div className="rounded-lg p-3 text-sm font-semibold" style={{ background:C.yellow, color:C.darkblue }}>
-          <strong>Volatilität & Unsicherheit:</strong> Günstige Fixierung durch Take-Profit nach Marktstabilisierung
-        </div>
-      </div>
-    </div>
-  </Slide>
-);
-
-const PerfSlide = ({ tag, title, kpis }) => (
-  <Slide title={title} sub={tag}>
-    <div className="flex-1 grid gap-6" style={{ gridTemplateColumns:'1.6fr 1fr' }}>
-      <div>
-        <div className="text-xs mb-2" style={{ color:C.dgray }}>Performance und Varianz ggü. Börsenpreisen · €/MWh</div>
-        <div className="rounded-xl overflow-hidden p-4" style={{ background:'#F9FAFB', height:'180px' }}>
-          <svg viewBox="0 0 380 130" className="w-full h-full">
-            <polygon points="20,110 90,25 160,78 280,92 380,108 280,118 160,98 90,58 20,120" fill="#FFD600" opacity="0.35"/>
-            <polygon points="20,106 90,5 160,68 280,88 380,105 280,112 160,94 90,42 20,115" fill="#D1D5DB" opacity="0.4"/>
-            <polyline points="20,108 90,15 160,73 280,90 380,106" fill="none" stroke="#6B7280" strokeWidth="1.5" strokeDasharray="5,3"/>
-            <polyline points="20,112 90,44 160,80 280,98 380,109" fill="none" stroke={C.blue} strokeWidth="2" strokeDasharray="5,3"/>
-            {['2022','2023','2024','2025'].map((y,i)=><text key={y} x={[18,88,158,278][i]} y="128" fill="#9CA3AF" fontSize="10">{y}</text>)}
-          </svg>
-        </div>
-        <div className="flex flex-wrap gap-4 mt-2">
-          {[['#FFD600','Varianz ecoplanet'],['#D1D5DB','Varianz Börse'],['#6B7280','ø Börsenpreis'],[C.blue,'ø ecoplanet']].map(([c,l])=>(
-            <div key={l} className="flex items-center gap-1.5 text-xs" style={{ color:C.dgray }}><div className="w-4 h-0.5" style={{ background:c }}/>{l}</div>
+          {/* Vertical day separators */}
+          {[1,2,3,4,5,6].map(d => (
+            <line key={d} x1={dayX(d)} y1={PT} x2={dayX(d)} y2={yBottom} stroke="#E5E7EB" strokeWidth="0.8"/>
           ))}
-        </div>
-      </div>
-      <div className="flex flex-col gap-3">
-        <div className="font-bold text-sm" style={{ color:C.blue }}>Historische Performance · 2022–2025</div>
-        {kpis.map(k=><KpiCard key={k.num} {...k} small/>)}
-      </div>
-    </div>
-  </Slide>
-);
 
-const S9  = () => <PerfSlide tag="Deep Dive Strom" title="Preise liegen mit optimierter Handelsstrategie konsistent unter Marktschnitt" kpis={[{num:'-6,7%',label:'Einsparung Fixierungspreis',desc:'ggü. Terminmarktdurchschnitt 2022–2025'},{num:'-50%',label:'Reduktion Risiko',desc:'Varianz Börsenpreise ggü. ecoplanet Modell'}]}/>;
-const S10 = () => <PerfSlide tag="Deep Dive Gas"  title="Preise liegen mit optimierter Handelsstrategie konsistent unter Marktschnitt" kpis={[{num:'-6,2%',label:'Einsparung Fixierungspreis',desc:'ggü. Terminmarktdurchschnitt 2022–2025'},{num:'-37%',label:'Reduktion Risiko',desc:'Varianz Börsenpreise ggü. ecoplanet Modell'}]}/>;
+          {/* Stacked product fills */}
+          {/* Unhedged */}
+          <path d={areaPath(stacks.map(s=>s[5]), stacks.map(s=>s[4]))} fill="#E5E7EB" opacity="0.75"/>
+          {/* PV */}
+          <path d={areaPath(stacks.map(s=>s[4]), stacks.map(s=>s[3]))} fill="#16A34A" opacity="0.65"/>
+          {/* Wind */}
+          <path d={areaPath(stacks.map(s=>s[3]), stacks.map(s=>s[2]))} fill="#0D9488" opacity="0.65"/>
+          {/* Peak */}
+          <path d={areaPath(stacks.map(s=>s[2]), stacks.map(s=>s[1]))} fill={C.blue} opacity="0.65"/>
+          {/* Base */}
+          <path d={areaPath(stacks.map(s=>s[1]), stacks.map(s=>s[0]))} fill={C.darkblue} opacity="0.75"/>
 
-const S11 = () => {
-  const months = [1,2,3,4,5,6,7,8,9,10,11,12];
-  return (
-    <Slide title="Deep Dive PPA (1/2): Portfolio kombiniert Terminmarktprodukte mit PPAs">
-      <div className="flex-1 grid grid-cols-2 gap-5">
-        {[
-          { title:'Exemplarischer Jahreslastgang Kunde', note:'Die Lastgang-Analyse zeigt, dass ein Teil der Terminmarktmenge durch kombinierte Wind- und PV-PPAs ersetzt werden kann.' },
-          { title:'Exemplarischer optimaler PPA Mix für Kunde',  note:'Wind- und PV-PPAs ergänzen sich antizyklisch: Hohe PV-Produktion im Sommer, hohe Windproduktion im Winter.' },
-        ].map(({ title, note }, di) => (
-          <div key={title}>
-            <div className="rounded-xl border p-3" style={{ borderColor:C.lgray }}>
-              <div className="text-xs font-semibold mb-2" style={{ color:C.darkblue }}>{title}</div>
-              <div className="flex items-end gap-0.5 h-20 px-1">
-                {months.map(m => {
-                  const wind = 30 + Math.sin(m * 0.5 + (di === 0 ? 1 : 2)) * 15;
-                  const solar = di === 0 ? 20 + Math.cos(m * 0.5) * 12 : 0;
-                  const base = 40;
-                  const total = base + wind + solar;
-                  return (
-                    <div key={m} className="flex-1 flex flex-col-reverse gap-px" style={{ height:'100%', alignItems:'stretch' }}>
-                      <div style={{ height:`${(base/total)*100}%`, background:C.blue, opacity:0.8, borderRadius:'2px 2px 0 0' }}/>
-                      <div style={{ height:`${(wind/total)*100}%`, background:'#0D9488', opacity:0.85 }}/>
-                      {solar > 0 && <div style={{ height:`${(solar/total)*100}%`, background:'#22C55E', opacity:0.85 }}/>}
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="flex justify-between mt-1">{months.map(m=><div key={m} className="flex-1 text-center" style={{ fontSize:'8px', color:C.dgray }}>{m}</div>)}</div>
-            </div>
-            <div className="text-xs leading-snug mt-2" style={{ color:'#374151' }}>{note}</div>
+          {/* Load profile line — drawn on top */}
+          <path d={loadLine} fill="none" stroke={C.darkblue} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/>
+
+          {/* Day labels */}
+          {DAY_LABELS.map((label, d) => (
+            <text key={d} x={dayMidX(d)} y={H-6} textAnchor="middle" fontSize="9.5" fill={C.dgray}>{label}</text>
+          ))}
+
+          {/* X-axis baseline */}
+          <line x1={PL} y1={yBottom} x2={W-PR} y2={yBottom} stroke="#E5E7EB" strokeWidth="1"/>
+        </svg>
+      </div>
+
+      {/* Sliders + Stats */}
+      <div className="grid grid-cols-2 gap-5">
+
+        {/* Sliders card */}
+        <div className="bg-white rounded-2xl border p-6" style={{ borderColor: C.lgray }}>
+          <div className="mb-5">
+            <h3 className="font-bold text-base" style={{ color: C.darkblue }}>Beschaffungsprodukte strukturieren</h3>
+            <p className="text-xs mt-0.5" style={{ color: C.dgray }}>Anteil der Produkte im Lastgang anpassen — Visualisierung aktualisiert sich live</p>
           </div>
-        ))}
-      </div>
-    </Slide>
-  );
-};
-
-const S12 = () => (
-  <Slide title="Deep Dive PPA (2/2): Integration von PPAs senkt Stromkosten signifikant">
-    <div className="flex-1 grid items-center gap-4" style={{ gridTemplateColumns:'1fr auto 1fr' }}>
-      {[
-        { head:'Lieferjahr 2026 – ohne PPA', segs:[{l:'70%',f:7,c:C.blue},{l:'30%',f:3,c:C.lightblue}], rows:[{l:'PV-PPA',c:'#22C55E',v:'–',p:'–'},{l:'Wind-PPA',c:'#0D9488',v:'–',p:'–'},{l:'Terminmarkt',c:C.blue,v:'8,57',p:'70%'},{l:'Spotmarkt',c:C.lightblue,v:'8,48',p:'30%'}], total:'8,52' },
-        { head:'Lieferjahr 2026 – mit PPA',  segs:[{l:'3%',f:0.3,c:'#22C55E'},{l:'27%',f:2.7,c:'#0D9488'},{l:'40%',f:4,c:C.blue},{l:'30%',f:3,c:C.lightblue}], rows:[{l:'PV-PPA',c:'#22C55E',v:'6,54',p:'3%'},{l:'Wind-PPA',c:'#0D9488',v:'7,64',p:'27%'},{l:'Terminmarkt',c:C.blue,v:'8,45',p:'40%'},{l:'Spotmarkt',c:C.lightblue,v:'',p:'30%'}], total:'8,24' },
-      ].map((sc,i) => (
-        <div key={i} className="rounded-xl border overflow-hidden" style={{ borderColor:C.lgray }}>
-          <div className="px-4 py-2 font-bold text-xs" style={{ background: i===1 ? C.blue : C.darkblue, color:'#fff' }}>{sc.head}</div>
-          <div className="flex h-6 overflow-hidden">{sc.segs.map(s=><div key={s.l} className="flex items-center justify-center text-white font-bold" style={{ flex:s.f, background:s.c, fontSize:'10px' }}>{s.l}</div>)}</div>
-          <table className="w-full text-xs">
-            <thead><tr className="border-b" style={{ borderColor:'#F3F4F6' }}>{['','ct/kWh','%'].map(h=><th key={h} className="px-3 py-1 text-left font-semibold" style={{ color:C.dgray }}>{h}</th>)}</tr></thead>
-            <tbody>{sc.rows.map(r=>(
-              <tr key={r.l} className="border-b last:border-0" style={{ borderColor:'#F9FAFB' }}>
-                <td className="px-3 py-1.5"><div className="flex items-center gap-1.5"><div className="w-2 h-2 rounded-sm" style={{ background:r.c }}/>{r.l}</div></td>
-                <td className="px-3 py-1.5" style={{ color:C.darkblue }}>{r.v||'–'}</td>
-                <td className="px-3 py-1.5" style={{ color:C.darkblue }}>{r.p||'–'}</td>
-              </tr>
-            ))}</tbody>
-            <tfoot><tr className="border-t-2" style={{ borderColor:C.lgray }}><td className="px-3 py-2 font-bold" style={{ color:C.darkblue }}>Simulierter Energiepreis</td><td className="px-3 py-2 font-bold" style={{ color:C.darkblue }}>{sc.total}</td><td/></tr></tfoot>
-          </table>
-        </div>
-      ))}
-      <div className="text-3xl font-bold text-center px-2" style={{ color:C.darkblue }}>→</div>
-    </div>
-  </Slide>
-);
-
-const S13 = () => {
-  const pkgs = [
-    { title:'Essential', cols:false, items:['Strategiecheck','Portfoliomanagement (Algorithmusbasiert)','Einsicht Energiemarktdaten'], price:'auf Anfrage' },
-    { title:'Premium', cols:true, items:['Strategiedefinition','Portfoliomanagement (Umsetzung)','Einsicht Energiemarktdaten','Verbrauchstransparenz','Kostentransparenz','Rechnungsprüfung','Lastprognose','Enge Betreuung Kundenservice'], price:'7.940 €/Jahr' },
-  ];
-  return (
-    <Slide title="Das Premium Paket bietet besten Service – optional übernehmen wir auch die Vertragssuche">
-      <div className="flex-1 flex gap-4 items-stretch">
-        {pkgs.map(p => (
-          <div key={p.title} className={`flex-1 rounded-xl overflow-hidden flex flex-col border-2`} style={{ borderColor: p.cols ? C.blue : C.lgray }}>
-            <div className="py-3 text-center font-bold text-sm" style={{ background: p.cols ? C.blue : '#C5CEFF', color: p.cols ? '#fff' : C.darkblue }}>{p.title}</div>
-            <div className="flex-1 p-4">{p.items.map(i=>(
-              <div key={i} className="flex items-start gap-2 py-1.5 border-b last:border-0 text-xs" style={{ borderColor:'#F3F4F6' }}>
-                <div className="w-4 h-4 rounded flex-shrink-0 flex items-center justify-center mt-0.5" style={{ background: p.cols ? C.blue : '#C5CEFF' }}>
-                  <span style={{ fontSize:'8px', color: p.cols ? '#fff' : C.darkblue }}>✓</span>
+          <div className="flex flex-col gap-5">
+            {PRODUCTS.map((p,idx) => (
+              <div key={p.key}>
+                <div className="flex justify-between items-center mb-1.5">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-sm flex-shrink-0" style={{ background: p.fillColor }}/>
+                    <span className="text-sm font-bold" style={{ color: C.darkblue }}>{p.label}</span>
+                    <span className="text-xs" style={{ color: C.dgray }}>{p.desc}</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-medium" style={{ color: C.dgray }}>
+                      {Math.round(sliders[p.key]/100 * p.max)} kW
+                    </span>
+                    <span className="text-sm font-bold w-10 text-right" style={{ color: p.color }}>{sliders[p.key]}%</span>
+                  </div>
                 </div>
-                <span style={{ color: p.cols ? '#374151' : C.dgray }}>{i}</span>
-              </div>
-            ))}</div>
-            <div className="px-4 pb-3 pt-2 flex justify-between items-center border-t-2" style={{ borderColor: p.cols ? C.blue : C.lgray }}>
-              <span className="text-xs font-semibold" style={{ color:C.darkblue }}>Preis</span>
-              <span className="font-bold text-sm" style={{ color: p.cols ? C.blue : C.dgray }}>{p.price}</span>
-            </div>
-          </div>
-        ))}
-        <div className="text-2xl font-bold self-center px-1" style={{ color:C.darkblue }}>+</div>
-        <div className="flex-[0.8] rounded-xl border-2 overflow-hidden flex flex-col" style={{ borderColor:C.blue }}>
-          <div className="py-3 text-center font-bold text-sm text-white" style={{ background:C.blue }}>Liefervertrag</div>
-          <div className="flex-1 p-4">
-            {['Marktsondierung','Versorgervergleich','Versorgerverhandlungen'].map(i=>(
-              <div key={i} className="flex items-start gap-2 py-1.5 border-b last:border-0 text-xs" style={{ borderColor:'#F3F4F6' }}>
-                <div className="w-4 h-4 rounded flex-shrink-0 flex items-center justify-center mt-0.5" style={{ background:C.blue }}>
-                  <span style={{ fontSize:'8px', color:'#fff' }}>✓</span>
+                <input type="range" min="0" max="100" value={sliders[p.key]}
+                  onChange={e => setSlider(p.key, e.target.value)}
+                  className="w-full"
+                  style={{ background:`linear-gradient(to right,${p.fillColor} ${sliders[p.key]}%,#E5E7EB ${sliders[p.key]}%)`, accentColor:p.fillColor }}/>
+                <div className="flex justify-between mt-0.5 text-xs" style={{ color:'#9CA3AF' }}>
+                  <span>0%</span>
+                  <span style={{ color:p.color, fontWeight:600 }}>{coverage[idx]}% des Lastgangs gedeckt</span>
+                  <span>100%</span>
                 </div>
-                <span style={{ color:'#374151' }}>{i}</span>
               </div>
             ))}
           </div>
         </div>
-      </div>
-    </Slide>
-  );
-};
 
-const S14 = () => (
-  <Slide title="Mit Vertragsabschluss beginnt Ihr Onboarding — Abschluss in 2–3 Wochen">
-    <div className="flex-1 relative flex items-center">
-      <div className="clip-arrow absolute inset-x-0 rounded-lg" style={{ background:C.blue, top:'12%', bottom:'4%' }}/>
-      <div className="relative z-10 grid grid-cols-3 gap-4 w-full px-3">
-        {[
-          { t:'Ausschreibung des Liefervertrags', bs:['Wir fragen <strong>Versorger an</strong>, die das Modell abbilden können','<strong>Vergleich</strong> auf qualitative und quantitative Kriterien'] },
-          { t:'Nach Unterschrift', bs:['Erstellung Ihrer <strong>idealen Beschaffungsstrategie</strong>','Durchsprache mit einem <strong>ecoplanet Experten</strong>'] },
-          { t:'3–4 Tage später', sub:'Abschluss Onboarding', bs:['<strong>Kick-Off</strong> mit dem ecoplanet Customer Service','<strong>Erster Blick</strong> in Software und ihre Funktionalitäten'] },
-        ].map(s=>(
-          <div key={s.t} className="bg-white rounded-xl p-4 shadow-sm">
-            <div className="font-bold text-sm text-center mb-2" style={{ color:C.darkblue }}>{s.t}{s.sub&&<div className="text-xs font-normal" style={{ color:C.dgray }}>{s.sub}</div>}</div>
-            {s.bs.map((b,i)=><Bullet key={i}>{b}</Bullet>)}
+        {/* Coverage stats card */}
+        <div className="flex flex-col gap-4">
+
+          {/* Product breakdown */}
+          <div className="bg-white rounded-2xl border p-5 flex-1" style={{ borderColor: C.lgray }}>
+            <div className="font-bold text-sm mb-4" style={{ color: C.darkblue }}>Abdeckung im Lastgang</div>
+            {PRODUCTS.map((p, idx) => (
+              <div key={p.key} className="flex items-center gap-3 mb-3 last:mb-0">
+                <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: p.fillColor }}/>
+                <span className="text-sm flex-1" style={{ color:'#374151' }}>{p.label}</span>
+                <div className="flex-1 h-2 rounded-full overflow-hidden bg-gray-100">
+                  <div className="h-full rounded-full transition-all duration-500"
+                    style={{ width:`${coverage[idx]}%`, background: p.fillColor, opacity:0.8 }}/>
+                </div>
+                <span className="text-sm font-bold w-12 text-right" style={{ color: p.color }}>{coverage[idx]}%</span>
+              </div>
+            ))}
+            {/* Unhedged */}
+            <div className="flex items-center gap-3 mt-3 pt-3 border-t" style={{ borderColor:'#F3F4F6' }}>
+              <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0 bg-gray-300"/>
+              <span className="text-sm flex-1" style={{ color: C.dgray }}>Ungedeckt (Spot)</span>
+              <div className="flex-1 h-2 rounded-full overflow-hidden bg-gray-100">
+                <div className="h-full rounded-full transition-all duration-500 bg-gray-300"
+                  style={{ width:`${Math.max(0, 100 - coverage.reduce((a,b)=>a+parseFloat(b),0)).toFixed(1)}%` }}/>
+              </div>
+              <span className="text-sm font-bold w-12 text-right" style={{ color: C.dgray }}>
+                {Math.max(0, 100 - coverage.reduce((a,b)=>a+parseFloat(b),0)).toFixed(1)}%
+              </span>
+            </div>
           </div>
-        ))}
-      </div>
-    </div>
-  </Slide>
-);
 
-const S15 = () => (
-  <NavySlide>
-    <div className="p-10">
-      <div className="text-white font-bold text-3xl tracking-tight" style={{ letterSpacing:'-1px' }}>ecoplanet</div>
-    </div>
-    <div className="absolute right-16 top-1/2 -translate-y-1/2 font-thin select-none" style={{ fontSize:'13rem', color:'rgba(255,255,255,0.1)', lineHeight:1 }}>{`}`}</div>
-    <div className="absolute bottom-10 left-10">
-      <p className="text-white font-bold">EcoPlanet Green Operations GmbH</p>
-      <p className="text-sm mt-1" style={{ color:'rgba(255,255,255,0.5)' }}>Marsstraße 46 · 80335 München</p>
-    </div>
-  </NavySlide>
-);
+          {/* Product characteristics */}
+          <div className="bg-white rounded-2xl border p-5" style={{ borderColor: C.lgray }}>
+            <div className="font-bold text-sm mb-3" style={{ color: C.darkblue }}>Produkteigenschaften</div>
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { label:'Base', tag:'24/7 Konstant', note:'Flat band, kein Profil-risiko', color:C.darkblue },
+                { label:'Peak', tag:'Mo–Fr 7–17 Uhr', note:'Höchste Lastzeiten abdecken', color:C.blue },
+                { label:'Wind PPA', tag:'Variable 24/7', note:'Nacht & Winterstunden stark', color:'#0D9488' },
+                { label:'PV-PPA',   tag:'Taglicht', note:'Mittag-Peak, saisonale Stärke', color:'#16A34A' },
+              ].map(c => (
+                <div key={c.label} className="rounded-xl p-3" style={{ background:'#F9FAFB', border:`1.5px solid #F0F0F0` }}>
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <div className="w-2 h-2 rounded-sm" style={{ background:c.color }}/>
+                    <span className="text-xs font-bold" style={{ color:c.color }}>{c.label}</span>
+                  </div>
+                  <div className="text-xs font-semibold" style={{ color:C.darkblue }}>{c.tag}</div>
+                  <div className="text-xs mt-0.5" style={{ color:C.dgray }}>{c.note}</div>
+                </div>
+              ))}
+            </div>
+          </div>
 
-const ALL_SLIDES = [S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14,S15];
-const SLIDE_LABELS = ['Cover','Value Prop','Energieeinkauf','3-Schritt-Prozess','Strom-Einsparungen','Gas-Einsparungen','Lastgang','Handelsstrategie','Performance Strom','Performance Gas','PPA 1/2','PPA 2/2','Service Pakete','Onboarding','Abschluss'];
-
-const StrategieTab = () => {
-  const [idx, setIdx] = useState(0);
-  const go = n => setIdx(Math.max(0, Math.min(ALL_SLIDES.length - 1, n)));
-
-  useEffect(() => {
-    const fn = e => { if(e.key==='ArrowRight'||e.key==='ArrowDown') go(idx+1); if(e.key==='ArrowLeft'||e.key==='ArrowUp') go(idx-1); };
-    window.addEventListener('keydown', fn);
-    return () => window.removeEventListener('keydown', fn);
-  }, [idx]);
-
-  const Current = ALL_SLIDES[idx];
-  return (
-    <div className="max-w-screen-xl mx-auto px-8 py-6">
-      {/* Slide navigator pills */}
-      <div className="flex flex-wrap gap-1.5 mb-5">
-        {SLIDE_LABELS.map((l,i) => (
-          <button key={i} onClick={() => setIdx(i)}
-            className="px-3 py-1 rounded-full text-xs font-medium transition-all"
-            style={{ background: i===idx ? C.blue : '#E8EAFF', color: i===idx ? '#fff' : C.darkblue }}>
-            {i+1}. {l}
-          </button>
-        ))}
-      </div>
-
-      {/* Slide */}
-      <div key={idx}><Current/></div>
-
-      {/* Controls */}
-      <div className="flex items-center justify-between mt-5 px-1">
-        <button onClick={() => go(idx-1)} disabled={idx===0}
-          className="px-6 py-2 rounded-lg font-semibold text-sm disabled:opacity-30"
-          style={{ background:C.blue, color:'#fff' }}>← Zurück</button>
-        <div className="flex items-center gap-1.5">
-          {ALL_SLIDES.map((_,i) => (
-            <button key={i} onClick={() => go(i)}
-              className="transition-all"
-              style={{ width:i===idx?'20px':'7px', height:'7px', borderRadius:i===idx?'4px':'50%', background:i===idx?C.blue:C.lgray }}/>
-          ))}
-        </div>
-        <div className="flex items-center gap-4">
-          <span className="text-sm" style={{ color:C.dgray }}>{idx+1} / {ALL_SLIDES.length}</span>
-          <button onClick={() => go(idx+1)} disabled={idx===ALL_SLIDES.length-1}
-            className="px-6 py-2 rounded-lg font-semibold text-sm disabled:opacity-30"
-            style={{ background:C.blue, color:'#fff' }}>Weiter →</button>
         </div>
       </div>
     </div>
@@ -571,138 +385,126 @@ const StrategieTab = () => {
 /* ═══════════════════════════════════════════
    PORTFOLIOMANAGEMENT TAB
 ═══════════════════════════════════════════ */
-const COMPS = [
-  { key:'term',  label:'Terminmarkt',  price:8.38, color:C.blue,       desc:'Fixe Jahreskontrakte an der EEX' },
-  { key:'spot',  label:'Spotmarkt',    price:8.21, color:C.lightblue,  desc:'Day-Ahead & Intraday Handel' },
-  { key:'wind',  label:'Wind PPA',     price:7.64, color:'#0D9488',    desc:'Langfristiger Windstromvertrag' },
-  { key:'solar', label:'Solar PPA',    price:6.54, color:'#22C55E',    desc:'Langfristiger Solarstromvertrag' },
+const PM_COMPS = [
+  { key:'term',  label:'Terminmarkt', price:8.38, color:C.blue,    desc:'Fixe Jahreskontrakte an der EEX' },
+  { key:'spot',  label:'Spotmarkt',   price:8.21, color:C.lblue,   desc:'Day-Ahead & Intraday Handel' },
+  { key:'wind',  label:'Wind PPA',    price:7.64, color:'#0D9488', desc:'Langfristiger Windstromvertrag' },
+  { key:'solar', label:'Solar PPA',   price:6.54, color:'#16A34A', desc:'Langfristiger Solarstromvertrag' },
 ];
-
 const OPTIMAL = { term:40, spot:30, wind:21, solar:9 };
-
-/* Monthly load profile data (MWh, seasonally adjusted) */
 const MONTHLY_LOAD = [1180,1050,1080,980,920,850,830,860,960,1040,1120,1240];
 
 const PortfolioTab = () => {
   const [mix, setMix] = useState({ term:40, spot:30, wind:20, solar:10 });
   const [animating, setAnimating] = useState(false);
 
-  const sum = Object.values(mix).reduce((a,b) => a+b, 0);
-  const blended = COMPS.reduce((acc,c) => acc + (mix[c.key]/Math.max(sum,1)) * c.price, 0);
-  const savingsPct = ((COMPANY.stromMarket - blended) / COMPANY.stromMarket * 100);
-  const savingsEur = Math.round((COMPANY.stromMarket - blended) / 100 * COMPANY.stromMWh * 1000);
+  const sum = Object.values(mix).reduce((a,b)=>a+b,0);
+  const blended = PM_COMPS.reduce((acc,c)=>acc+(mix[c.key]/Math.max(sum,1))*c.price,0);
+  const savingsPct = ((COMPANY.stromMarket - blended)/COMPANY.stromMarket*100);
+  const savingsEur = Math.round((COMPANY.stromMarket - blended)/100*COMPANY.stromMWh*1000);
+  const normPct = key => sum > 0 ? (mix[key]/sum)*100 : 0;
 
-  const adjust = (key, val) => setMix(prev => ({ ...prev, [key]: Math.max(0, Math.min(100, Number(val))) }));
-
-  const applyOptimal = () => {
-    setAnimating(true);
-    setMix(OPTIMAL);
-    setTimeout(() => setAnimating(false), 800);
-  };
-
-  const normPct = key => sum > 0 ? (mix[key] / sum) * 100 : 0;
+  const applyOptimal = () => { setAnimating(true); setMix(OPTIMAL); setTimeout(()=>setAnimating(false),800); };
+  const adjust = (k,v) => setMix(p=>({...p,[k]:Math.max(0,Math.min(100,Number(v)))}));
 
   return (
-    <div className="max-w-screen-xl mx-auto px-8 py-6 flex flex-col gap-6">
+    <div className="max-w-screen-xl mx-auto px-8 py-6 flex flex-col gap-5">
+      <div className="grid gap-5" style={{ gridTemplateColumns:'1fr 320px' }}>
 
-      {/* Top row: Lastgang chart + KPIs */}
-      <div className="grid gap-5" style={{ gridTemplateColumns:'1fr 340px' }}>
-
-        {/* Lastgang + mix visualization */}
+        {/* Lastgang chart */}
         <div className="bg-white rounded-2xl border p-6" style={{ borderColor:C.lgray }}>
           <div className="flex justify-between items-center mb-4">
             <div>
-              <h3 className="font-bold text-base" style={{ color:C.darkblue }}>Lastgang & Produktstrukturierung</h3>
-              <p className="text-xs mt-0.5" style={{ color:C.dgray }}>Monatlicher Verbrauch mit zugeordnetem Produktmix</p>
+              <h3 className="font-bold text-sm" style={{ color:C.darkblue }}>Lastgang & Produktstrukturierung</h3>
+              <p className="text-xs mt-0.5" style={{ color:C.dgray }}>Monatlicher Verbrauch mit Produktmix</p>
             </div>
             <div className="flex gap-3">
-              {COMPS.map(c => (
+              {PM_COMPS.map(c=>(
                 <div key={c.key} className="flex items-center gap-1.5 text-xs" style={{ color:C.dgray }}>
-                  <div className="w-3 h-3 rounded-sm" style={{ background:c.color }}/>
+                  <div className="w-2.5 h-2.5 rounded-sm" style={{ background:c.color }}/>
                   {c.label}
                 </div>
               ))}
             </div>
           </div>
-
-          {/* Stacked bar chart */}
-          <div className="flex items-end gap-2" style={{ height:'180px' }}>
-            {MONTHLY_LOAD.map((load, mi) => {
-              const fracs = COMPS.map(c => ({ color:c.color, h: normPct(c.key) }));
-              return (
-                <div key={mi} className="flex-1 flex flex-col justify-end" style={{ height:'100%' }}>
-                  <div className="w-full rounded-t overflow-hidden flex flex-col-reverse" style={{ height:`${(load/1280)*100}%`, transition:'height 0.4s ease' }}>
-                    {fracs.map(f => f.h > 0 && (
-                      <div key={f.color} style={{ height:`${f.h}%`, background:f.color, transition:'height 0.4s ease', minHeight:'2px' }}/>
-                    ))}
-                  </div>
-                  <div className="text-center mt-1" style={{ fontSize:'9px', color:C.dgray }}>
-                    {['J','F','M','A','M','J','J','A','S','O','N','D'][mi]}
-                  </div>
+          <div className="flex items-end gap-2" style={{ height:'170px' }}>
+            {MONTHLY_LOAD.map((load, mi) => (
+              <div key={mi} className="flex-1 flex flex-col justify-end" style={{ height:'100%' }}>
+                <div className="w-full rounded-t overflow-hidden flex flex-col-reverse"
+                  style={{ height:`${(load/1320)*100}%`, transition:'height 0.4s ease' }}>
+                  {PM_COMPS.map(c => {
+                    const p = normPct(c.key);
+                    return p > 0 ? <div key={c.key} style={{ height:`${p}%`, background:c.color, minHeight:'2px', transition:'height 0.4s ease' }}/> : null;
+                  })}
                 </div>
-              );
-            })}
+                <div className="text-center mt-1" style={{ fontSize:'9px', color:C.dgray }}>
+                  {['J','F','M','A','M','J','J','A','S','O','N','D'][mi]}
+                </div>
+              </div>
+            ))}
           </div>
-
-          {/* Segmented mix bar */}
-          <div className="mt-4">
-            <div className="text-xs font-semibold mb-1.5" style={{ color:C.darkblue }}>Aktuelle Produktverteilung</div>
-            <div className="flex rounded-lg overflow-hidden h-8">
-              {COMPS.map(c => {
-                const p = normPct(c.key);
-                return p > 0 ? (
-                  <div key={c.key} className="flex items-center justify-center text-white font-bold transition-all duration-500"
-                    style={{ flex:p, background:c.color, fontSize: p > 10 ? '11px' : '0px', minWidth:'2px' }}>
-                    {p.toFixed(0)}%
-                  </div>
-                ) : null;
+          <div className="mt-3">
+            <div className="text-xs font-semibold mb-1" style={{ color:C.darkblue }}>Aktuelle Produktverteilung</div>
+            <div className="flex rounded-lg overflow-hidden h-7">
+              {PM_COMPS.map(c => { const p=normPct(c.key); return p>0 ?
+                <div key={c.key} className="flex items-center justify-center text-white font-bold transition-all duration-500"
+                  style={{ flex:p, background:c.color, fontSize:p>10?'11px':'0px', minWidth:'2px' }}>
+                  {p.toFixed(0)}%
+                </div> : null;
               })}
             </div>
-            {sum !== 100 && (
-              <div className="mt-1.5 text-xs px-3 py-1.5 rounded-lg font-medium inline-block" style={{ background:'#FEF9C3', color:'#854D0E' }}>
-                Summe: {sum}% — Balken zeigt normalisierte Verteilung
-              </div>
-            )}
+            {sum!==100 && <div className="mt-1.5 text-xs px-2 py-1 rounded-lg inline-block" style={{ background:'#FEF9C3', color:'#854D0E' }}>Summe: {sum}% — Balken zeigt normalisierte Verteilung</div>}
           </div>
         </div>
 
-        {/* Result card */}
+        {/* Result cards */}
         <div className="flex flex-col gap-4">
           <div className="rounded-2xl p-5 text-white" style={{ background:C.darkblue }}>
-            <div className="text-xs opacity-60 mb-1">Ihr optimierter Arbeitspreis</div>
-            <div className="font-bold leading-none" style={{ fontSize:'2.8rem' }}>{blended.toFixed(2)}</div>
-            <div className="text-sm opacity-70 mt-0.5">ct/kWh (gewichteter Ø)</div>
+            <div className="text-xs opacity-55 mb-1">Optimierter Arbeitspreis</div>
+            <div className="font-bold leading-none" style={{ fontSize:'2.6rem' }}>{blended.toFixed(2)}</div>
+            <div className="text-sm opacity-65 mt-0.5">ct/kWh (gewichteter Ø)</div>
           </div>
-          <div className={`rounded-2xl p-5 ${animating ? 'pulse-btn' : ''}`} style={{ background:C.yellow }}>
+          <div className={`rounded-2xl p-5 ${animating?'pulse-btn':''}`} style={{ background:C.yellow }}>
             <div className="text-xs font-semibold mb-0.5" style={{ color:C.darkblue }}>Einsparung vs. Marktpreis</div>
-            <div className="font-bold leading-none" style={{ fontSize:'2.4rem', color:C.darkblue }}>-{savingsPct.toFixed(1)}%</div>
-            <div className="text-sm font-semibold mt-1" style={{ color:C.darkblue }}>
-              ≈ {savingsEur > 0 ? savingsEur.toLocaleString('de-DE') : '0'} € / Jahr
+            <div className="font-bold leading-none" style={{ fontSize:'2.2rem', color:C.darkblue }}>-{savingsPct.toFixed(1)}%</div>
+            <div className="text-sm font-bold mt-1" style={{ color:C.darkblue }}>≈ {savingsEur>0?savingsEur.toLocaleString('de-DE'):'0'} €/Jahr</div>
+            <div className="text-xs mt-1 opacity-60" style={{ color:C.darkblue }}>Basis: {COMPANY.stromMarket} ct/kWh Markt</div>
+          </div>
+          <div className="rounded-2xl border p-4" style={{ borderColor:C.lgray, background:'white' }}>
+            {PM_COMPS.map(c=>(
+              <div key={c.key} className="flex items-center gap-2 py-1.5 border-b last:border-0" style={{ borderColor:'#F3F4F6' }}>
+                <div className="w-2 h-2 rounded-sm flex-shrink-0" style={{ background:c.color }}/>
+                <span className="text-xs flex-1" style={{ color:'#374151' }}>{c.label}</span>
+                <span className="text-xs" style={{ color:C.dgray }}>{normPct(c.key).toFixed(1)}%</span>
+                <span className="text-xs font-semibold w-24 text-right" style={{ color:C.darkblue }}>
+                  {normPct(c.key)>0?`${((normPct(c.key)/100)*c.price).toFixed(3)} ct/kWh`:'–'}
+                </span>
+              </div>
+            ))}
+            <div className="flex justify-between pt-2 border-t mt-1" style={{ borderColor:C.lgray }}>
+              <span className="text-xs font-bold" style={{ color:C.darkblue }}>Gesamt</span>
+              <span className="text-xs font-bold" style={{ color:C.blue }}>{blended.toFixed(3)} ct/kWh</span>
             </div>
-            <div className="text-xs mt-1 opacity-70" style={{ color:C.darkblue }}>Basis: {COMPANY.stromMarket} ct/kWh Markt</div>
           </div>
         </div>
       </div>
 
-      {/* Sliders row + optimize button */}
+      {/* Sliders */}
       <div className="bg-white rounded-2xl border p-6" style={{ borderColor:C.lgray }}>
         <div className="flex items-center justify-between mb-5">
           <div>
             <h3 className="font-bold text-base" style={{ color:C.darkblue }}>Produktmix konfigurieren</h3>
-            <p className="text-xs mt-0.5" style={{ color:C.dgray }}>Schieberegler anpassen — Lastgang und Preis aktualisieren sich live</p>
+            <p className="text-xs mt-0.5" style={{ color:C.dgray }}>Anteile anpassen — Preis und Chart aktualisieren sich live</p>
           </div>
           <button onClick={applyOptimal}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition-transform active:scale-95"
-            style={{ background:C.yellow, color:C.darkblue, boxShadow:'0 2px 12px rgba(226,236,43,0.5)' }}>
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M8 1l1.8 3.6 4 .6-2.9 2.8.7 4L8 10l-3.6 1.9.7-4L2.2 5.2l4-.6z" fill={C.darkblue}/>
-            </svg>
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm active:scale-95 transition-transform"
+            style={{ background:C.yellow, color:C.darkblue, boxShadow:'0 2px 12px rgba(226,236,43,.45)' }}>
+            <svg width="14" height="14" viewBox="0 0 16 16"><path d="M8 1l1.8 3.6 4 .6-2.9 2.8.7 4L8 10l-3.6 1.9.7-4L2.2 5.2l4-.6z" fill={C.darkblue}/></svg>
             Optimale Produktzusammensetzung
           </button>
         </div>
-
         <div className="grid grid-cols-2 gap-x-12 gap-y-5">
-          {COMPS.map(c => (
+          {PM_COMPS.map(c=>(
             <div key={c.key}>
               <div className="flex justify-between items-center mb-1.5">
                 <div className="flex items-center gap-2">
@@ -711,19 +513,14 @@ const PortfolioTab = () => {
                   <span className="text-xs" style={{ color:C.dgray }}>{c.desc}</span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="text-xs font-medium" style={{ color:C.dgray }}>{c.price} ct/kWh</span>
+                  <span className="text-xs" style={{ color:C.dgray }}>{c.price} ct/kWh</span>
                   <span className="text-sm font-bold w-12 text-right" style={{ color:c.color }}>{mix[c.key]}%</span>
                 </div>
               </div>
               <input type="range" min="0" max="100" value={mix[c.key]}
-                onChange={e => adjust(c.key, e.target.value)}
-                className="w-full"
-                style={{
-                  background:`linear-gradient(to right, ${c.color} ${mix[c.key]}%, #E5E7EB ${mix[c.key]}%)`,
-                  accentColor: c.color,
-                }}/>
-              {/* Contribution line */}
-              <div className="flex justify-between mt-1 text-xs" style={{ color:C.dgray }}>
+                onChange={e=>adjust(c.key,e.target.value)} className="w-full"
+                style={{ background:`linear-gradient(to right,${c.color} ${mix[c.key]}%,#E5E7EB ${mix[c.key]}%)`, accentColor:c.color }}/>
+              <div className="flex justify-between mt-0.5 text-xs" style={{ color:'#9CA3AF' }}>
                 <span>Beitrag zum Preis</span>
                 <span style={{ color:C.darkblue, fontWeight:600 }}>
                   {normPct(c.key).toFixed(1)}% × {c.price} = {((normPct(c.key)/100)*c.price).toFixed(3)} ct/kWh
@@ -732,20 +529,16 @@ const PortfolioTab = () => {
             </div>
           ))}
         </div>
-
-        {/* Breakdown table */}
-        <div className="mt-6 pt-5 border-t" style={{ borderColor:'#F3F4F6' }}>
-          <div className="flex justify-between items-center text-xs font-bold" style={{ color:C.darkblue }}>
-            <span>Gewichteter Gesamtpreis</span>
-            <span style={{ color:C.blue, fontSize:'1rem' }}>{blended.toFixed(3)} ct/kWh</span>
-          </div>
-          <div className="flex justify-between items-center text-xs mt-1" style={{ color:C.dgray }}>
-            <span>Einsparung vs. Marktpreis ({COMPANY.stromMarket} ct/kWh)</span>
-            <span style={{ color:'#16A34A', fontWeight:700 }}>-{(COMPANY.stromMarket - blended).toFixed(3)} ct/kWh ({savingsPct.toFixed(1)}%)</span>
+        <div className="mt-5 pt-4 border-t flex justify-between items-center" style={{ borderColor:'#F3F4F6' }}>
+          <div className="text-xs font-bold" style={{ color:C.darkblue }}>Gewichteter Gesamtpreis</div>
+          <div>
+            <span className="font-bold" style={{ color:C.blue, fontSize:'1.05rem' }}>{blended.toFixed(3)} ct/kWh</span>
+            <span className="text-xs ml-3" style={{ color:'#16A34A', fontWeight:700 }}>
+              -{(COMPANY.stromMarket-blended).toFixed(3)} ct/kWh ({savingsPct.toFixed(1)}%)
+            </span>
           </div>
         </div>
       </div>
-
     </div>
   );
 };
@@ -758,14 +551,10 @@ function App() {
   return (
     <div className="min-h-screen" style={{ background:C.bg }}>
       <Header tab={tab} setTab={setTab}/>
-      {tab === 'Strategie' ? <StrategieTab/> : <PortfolioTab/>}
+      {tab==='Strategie' ? <StrategieTab/> : <PortfolioTab/>}
     </div>
   );
 }
-
-const style = document.createElement('style');
-style.textContent = `input[type=range]::-webkit-slider-thumb { background: currentColor; }`;
-document.head.appendChild(style);
 
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
