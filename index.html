@@ -385,257 +385,208 @@ const StrategieTab = () => {
 };
 
 /* ═══════════════════════════════════════════
-   SCENARIO DATA
+   SCENARIO TAB DESCRIPTORS (for nav only)
 ═══════════════════════════════════════════ */
 const SCENARIOS = {
-  crisis: {
-    id: 'crisis',
-    title: 'Energiekrise 2022/2023',
-    subtitle: 'EEX CAL-23 – Terminmarktpreis Strom · Jahresprodukt 2023',
-    yMax: 680,
-    speed: 260,
-    gridY: [0, 150, 300, 450, 600],
-    event: { idx: 8, label: 'Nord Stream II', date: '26.09.2022' },
-    data: [
-      { l:'Jan 22', p:82,  bU:102, bL:64,  buy:null,  note:null },
-      { l:'Feb 22', p:106, bU:130, bL:80,  buy:null,  note:null },
-      { l:'Mrz 22', p:178, bU:148, bL:88,  buy:108,   note:'Stop-Loss ①' },
-      { l:'Apr 22', p:150, bU:192, bL:112, buy:null,  note:null },
-      { l:'Mai 22', p:165, bU:212, bL:128, buy:null,  note:null },
-      { l:'Jun 22', p:218, bU:250, bL:148, buy:162,   note:'Take-Profit ②' },
-      { l:'Jul 22', p:290, bU:305, bL:185, buy:null,  note:null },
-      { l:'Aug 22', p:440, bU:418, bL:242, buy:null,  note:null },
-      { l:'Sep 22', p:598, bU:562, bL:345, buy:388,   note:'Stop-Loss ③' },
-      { l:'Okt 22', p:310, bU:496, bL:275, buy:295,   note:'Take-Profit ④' },
-      { l:'Nov 22', p:218, bU:362, bL:208, buy:null,  note:null },
-      { l:'Dez 22', p:185, bU:290, bL:178, buy:192,   note:'Take-Profit ⑤' },
-      { l:'Jan 23', p:160, bU:246, bL:150, buy:null,  note:null },
-      { l:'Feb 23', p:136, bU:205, bL:126, buy:null,  note:null },
-      { l:'Mrz 23', p:110, bU:170, bL:100, buy:null,  note:null },
-      { l:'Apr 23', p:96,  bU:148, bL:86,  buy:null,  note:null },
-    ],
-  },
-  current: {
-    id: 'current',
-    title: 'Aktuelle Marktsituation',
-    subtitle: 'EEX CAL-25/26 – Terminmarktpreis Strom · aktuell',
-    yMax: 150,
-    speed: 280,
-    gridY: [0, 40, 80, 120],
-    event: null,
-    data: [
-      { l:'Jan 24', p:95,  bU:108, bL:84,  buy:null,  note:null },
-      { l:'Feb 24', p:88,  bU:102, bL:79,  buy:88,    note:'Take-Profit ①' },
-      { l:'Mrz 24', p:92,  bU:101, bL:82,  buy:null,  note:null },
-      { l:'Apr 24', p:85,  bU:97,  bL:76,  buy:null,  note:null },
-      { l:'Mai 24', p:82,  bU:95,  bL:74,  buy:82,    note:'Take-Profit ②' },
-      { l:'Jun 24', p:89,  bU:99,  bL:79,  buy:null,  note:null },
-      { l:'Jul 24', p:96,  bU:107, bL:85,  buy:null,  note:null },
-      { l:'Aug 24', p:92,  bU:105, bL:83,  buy:null,  note:null },
-      { l:'Sep 24', p:86,  bU:100, bL:77,  buy:86,    note:'Take-Profit ③' },
-      { l:'Okt 24', p:90,  bU:101, bL:81,  buy:null,  note:null },
-      { l:'Nov 24', p:88,  bU:100, bL:79,  buy:88,    note:'Take-Profit ④' },
-      { l:'Dez 24', p:93,  bU:104, bL:83,  buy:null,  note:null },
-      { l:'Jan 25', p:88,  bU:101, bL:80,  buy:null,  note:null },
-      { l:'Feb 25', p:84,  bU:97,  bL:76,  buy:84,    note:'Take-Profit ⑤' },
-      { l:'Mrz 25', p:90,  bU:102, bL:81,  buy:null,  note:null },
-      { l:'Apr 25', p:88,  bU:100, bL:79,  buy:null,  note:null },
-    ],
-  },
+  crisis:  { id:'crisis',  title:'Energiekrise 2022/2023',   subtitle:'EEX CAL-23 – Terminmarktpreis Strom · Jahresprodukt 2023' },
+  current: { id:'current', title:'Aktuelle Marktsituation',  subtitle:'EEX Terminmarkt · Jan–Apr 2026' },
 };
 
-/* ─── Animated scenario chart ─── */
-const ScenarioChart = ({ scenario }) => {
+/* ═══════════════════════════════════════════
+   CRISIS CHART (Mar 2022 – Jan 2023)
+═══════════════════════════════════════════ */
+const CRISIS_DATA = (() => {
+  const rng = makeRng(42);
+  const N = 340;
+  // Waypoints: [day, blue, orange, green]
+  const wp = [
+    [0,   95,  101,  85],
+    [31,  130, 130,  70],
+    [61,  168, 155,  52],
+    [92,  138, 168,  78],
+    [122, 148, 175, 112],
+    [153, 158, 182, 125],
+    [185, 208, 205, 130], // E1: blue crosses above Stop-Loss
+    [200, 258, 248, 132],
+    [209, 282, 265, 105], // E2: Nord Stream II (Sep 26)
+    [215, 200, 195,  68],
+    [220, 188, 190, 185],
+    [225, 175, 182, 184], // E3: blue drops below Stop-Loss
+    [245, 168, 188, 175],
+    [275, 172, 195, 167],
+    [306, 155, 200, 163],
+    [315, 160, 201, 162], // E4: blue crosses below Take-Profit
+    [337, 135, 203, 125],
+  ];
+  const lerp = (a,b,t) => a+(b-a)*t;
+  const interp = (day, col) => {
+    for (let j=0; j<wp.length-1; j++) {
+      if (day>=wp[j][0] && day<=wp[j+1][0]) {
+        const t=(day-wp[j][0])/(wp[j+1][0]-wp[j][0]);
+        return lerp(wp[j][col], wp[j+1][col], t);
+      }
+    }
+    return wp[wp.length-1][col];
+  };
+  const blue=[], orange=[], green=[], labels=[];
+  const start = new Date(2022,2,1);
+  for (let i=0; i<N; i++) {
+    const d = new Date(start); d.setDate(start.getDate()+i);
+    const mo=['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'][d.getMonth()];
+    labels.push(`${d.getDate()}. ${mo} '${String(d.getFullYear()).slice(2)}`);
+    blue.push(  +(interp(i,1)+(rng()-0.5)*20).toFixed(1));
+    orange.push(+(interp(i,2)+(rng()-0.5)*5 ).toFixed(1));
+    green.push( +(interp(i,3)+(rng()-0.5)*10).toFixed(1));
+  }
+  // Force exact crossing values
+  const E1=185, E2=209, E3=225, E4=315;
+  blue[E1]=208; orange[E1]=205;
+  blue[E2]=282; orange[E2]=265;
+  blue[E3]=175; orange[E3]=182;
+  blue[E4]=160; green[E4] =162;
+  return { labels, blue, orange, green, N, E1, E2, E3, E4 };
+})();
+
+const CrisisChart = () => {
   const [step, setStep] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [notifications, setNotifications] = useState([]);
+  const { labels, blue, orange, green, N, E1, E2, E3, E4 } = CRISIS_DATA;
 
-  /* Reset on scenario switch */
-  useEffect(() => { setStep(0); setPlaying(false); }, [scenario.id]);
-
-  /* Tick */
   useEffect(() => {
     if (!playing) return;
-    if (step >= scenario.data.length - 1) { setPlaying(false); return; }
-    const t = setTimeout(() => setStep(s => s + 1), scenario.speed);
+    if (step >= N-1) { setPlaying(false); return; }
+    const t = setTimeout(() => setStep(s=>s+1), 35);
     return () => clearTimeout(t);
-  }, [playing, step, scenario]);
+  }, [playing, step]);
 
-  const handlePlay = () => {
-    if (step >= scenario.data.length - 1) setStep(0);
-    setPlaying(p => !p);
+  useEffect(() => {
+    const add = (id,color,bg,border,icon,title,msg,date) =>
+      setNotifications(prev => prev.find(n=>n.id===id) ? prev : [...prev,{id,color,bg,border,icon,title,msg,date}]);
+    if (step===E1) add(1,'#92400E','#FEF3C7','#FCD34D','⚠',
+      'Stop-Loss Warnung',
+      'Marktpreis überschreitet Stop-Loss — erhöhte Marktvolatilität',
+      labels[E1]);
+    if (step===E2) add(2,'#991B1B','#FEF2F2','#FCA5A5','💥',
+      'Explosion Nord Stream II',
+      'Direkte Fixierung auf Grund von Stop-Loss zu 265 €/MWh',
+      '26. Sep \'22');
+    if (step===E3) add(3,'#1E40AF','#EFF6FF','#BFDBFE','↓',
+      'Marktkorrektur',
+      'Marktpreis fällt unter Stop-Loss — Normalisierung der Marktlage',
+      labels[E3]);
+    if (step===E4) add(4,'#166534','#DCFCE7','#86EFAC','✓',
+      'Take-Profit ausgelöst',
+      'Marktpreis unterschreitet Take-Profit — günstige Fixierungsmöglichkeit',
+      labels[E4]);
+  }, [step]);
+
+  const replay = () => { setStep(0); setNotifications([]); setPlaying(true); };
+
+  const W=820, H=260, PAD={l:52,r:20,t:16,b:32};
+  const cw=W-PAD.l-PAD.r, ch=H-PAD.t-PAD.b;
+  const yMin=40, yMax=310;
+  const xOf = i => PAD.l+(i/(N-1))*cw;
+  const yOf = v => PAD.t+(1-(v-yMin)/(yMax-yMin))*ch;
+  const mkPath = arr => {
+    if (step<1) return '';
+    return 'M '+arr.slice(0,step+1).map((v,i)=>`${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(' L ');
   };
 
-  const vis  = scenario.data.slice(0, step + 1);
-  const n    = vis.length;
-  const done = step >= scenario.data.length - 1;
+  // Month tick positions (1st of each month)
+  const monthTicks = [];
+  const startD = new Date(2022,2,1);
+  for (let i=0; i<N; i++) {
+    const d = new Date(startD); d.setDate(startD.getDate()+i);
+    if (d.getDate()===1) {
+      const mo=['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'][d.getMonth()];
+      monthTicks.push({ i, label: mo + (d.getFullYear()===2023?' \'23':' \'22') });
+    }
+  }
 
-  /* SVG layout */
-  const W=820, H=230, PL=50, PB=30, PT=18, PR=14;
-  const CW=W-PL-PR, CH=H-PT-PB;
-  const xp = i => PL + (i / (scenario.data.length - 1)) * CW;
-  const yp = v => PT + CH - (v / scenario.yMax) * CH;
-  const yBot = PT + CH;
-
-  /* Paths */
-  const mkLine = (arr, key) => arr.map((d,i) => `${i===0?'M':'L'}${xp(i).toFixed(1)},${yp(d[key]).toFixed(1)}`).join(' ');
-
-  const bollFill = n > 1 ? (
-    vis.map((d,i)=>`${i===0?'M':'L'}${xp(i).toFixed(1)},${yp(d.bU).toFixed(1)}`).join(' ') + ' ' +
-    [...vis].reverse().map((d,ri)=>`L${xp(n-1-ri).toFixed(1)},${yp(d.bL).toFixed(1)}`).join(' ') + ' Z'
-  ) : '';
-
-  /* Running ecoplanet average */
-  let epPts = [], runSum = 0, runCnt = 0;
-  vis.forEach((d, i) => {
-    if (d.buy !== null) { runSum += d.buy; runCnt++; }
-    if (runCnt > 0) epPts.push({ i, v: runSum / runCnt });
-  });
-  const epLine = epPts.length > 1
-    ? epPts.map((p,i)=>`${i===0?'M':'L'}${xp(p.i).toFixed(1)},${yp(p.v).toFixed(1)}`).join(' ')
-    : '';
-  const epAvgNow = epPts.length > 0 ? epPts[epPts.length-1].v : null;
-  const mktAvgNow = vis.reduce((a,d)=>a+d.p,0) / Math.max(n,1);
-  const savNow = epAvgNow ? ((mktAvgNow - epAvgNow) / mktAvgNow * 100) : null;
-
-  /* Buy signal indices */
-  const buyIdx = [];
-  vis.forEach((d,i) => { if (d.buy !== null) buyIdx.push(i); });
+  const EVENTS = [{e:E1,c:'#D97706'},{e:E2,c:'#DC2626'},{e:E3,c:'#2563EB'},{e:E4,c:'#16A34A'}];
 
   return (
     <div>
-      {/* Legend row */}
-      <div className="flex items-center gap-6 mb-2 px-1">
-        {[
-          { color:C.darkblue, dash:false, label:'Terminmarktpreis' },
-          { color:C.blue,     dash:true,  label:'Bollinger Bänder', fill:true },
-          { color:C.yellow,   dash:true,  label:'ø ecoplanet Einkauf' },
-          { color:C.yellow,   circle:true,label:'Kauf-Signal (Tranche)' },
-        ].map((l,i)=>(
-          <div key={i} className="flex items-center gap-1.5 text-xs" style={{ color:C.dgray }}>
-            {l.circle
-              ? <div className="w-3.5 h-3.5 rounded-full border-2 flex-shrink-0" style={{ background:C.yellow, borderColor:C.darkblue }}/>
-              : l.fill
-              ? <div className="w-6 h-3 rounded-sm flex-shrink-0" style={{ background:C.blue, opacity:0.15, border:`1px dashed ${C.blue}` }}/>
-              : <div className="w-5 h-0 flex-shrink-0" style={{ borderTop:`2px ${l.dash?'dashed':'solid'} ${l.color}` }}/>
-            }
-            {l.label}
-          </div>
-        ))}
-        <div className="ml-auto text-xs" style={{ color:'#9CA3AF' }}>€/MWh</div>
-      </div>
-
-      {/* SVG */}
-      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ display:'block' }}>
-        {/* Y grid */}
-        {scenario.gridY.map(v=>(
-          <g key={v}>
-            <line x1={PL} y1={yp(v)} x2={W-PR} y2={yp(v)} stroke="#F3F4F6" strokeWidth="1"/>
-            <text x={PL-5} y={yp(v)+3.5} textAnchor="end" fontSize="9" fill="#9CA3AF">{v}</text>
-          </g>
-        ))}
-        <line x1={PL} y1={yBot} x2={W-PR} y2={yBot} stroke="#E5E7EB" strokeWidth="1"/>
-
-        {/* Bollinger band fill */}
-        {bollFill && <path d={bollFill} fill={C.blue} opacity="0.07"/>}
-        {n>1 && <path d={mkLine(vis,'bU')} fill="none" stroke={C.lblue} strokeWidth="0.9" strokeDasharray="4,2" opacity="0.55"/>}
-        {n>1 && <path d={mkLine(vis,'bL')} fill="none" stroke={C.lblue} strokeWidth="0.9" strokeDasharray="4,2" opacity="0.55"/>}
-
-        {/* ecoplanet avg line */}
-        {epLine && <path d={epLine} fill="none" stroke={C.yellow} strokeWidth="2.2" strokeDasharray="6,3"/>}
-
-        {/* Market price line */}
-        {n>0 && <path d={mkLine(vis,'p')} fill="none" stroke={C.darkblue} strokeWidth="2" strokeLinejoin="round"/>}
-
-        {/* Nord Stream event annotation */}
-        {scenario.event && step >= scenario.event.idx && (() => {
-          const ex = xp(scenario.event.idx);
-          return (
-            <g>
-              <line x1={ex} y1={PT} x2={ex} y2={yBot} stroke="#EF4444" strokeWidth="1" strokeDasharray="4,3" opacity="0.7"/>
-              <rect x={ex+4} y={PT+2} width="88" height="26" rx="3" fill="#FEF2F2" stroke="#FCA5A5" strokeWidth="0.8"/>
-              <text x={ex+8} y={PT+13} fontSize="8" fontWeight="bold" fill="#DC2626">{scenario.event.label}</text>
-              <text x={ex+8} y={PT+23} fontSize="7.5" fill="#EF4444">{scenario.event.date}</text>
-            </g>
-          );
-        })()}
-
-        {/* Buy signal markers */}
-        {buyIdx.map(i => {
-          const d = vis[i];
-          const cx = xp(i), cy = yp(d.p);
-          const labelAbove = i < scenario.data.length * 0.8;
-          return (
-            <g key={i}>
-              <line x1={cx} y1={PT} x2={cx} y2={yBot} stroke={C.yellow} strokeWidth="0.8" strokeDasharray="3,3" opacity="0.5"/>
-              <circle cx={cx} cy={cy} r="6" fill={C.yellow} stroke={C.darkblue} strokeWidth="1.5"/>
-              <text x={cx} y={cy+(labelAbove?-11:16)} textAnchor="middle" fontSize="8" fontWeight="bold" fill={C.darkblue}>
-                {d.buy}€
-              </text>
-              {d.note && (
-                <text x={cx} y={cy+(labelAbove?-21:26)} textAnchor="middle" fontSize="7.5" fill={C.dgray}>{d.note}</text>
-              )}
-            </g>
-          );
-        })}
-
-        {/* Live cursor */}
-        {!done && n>0 && (
-          <line x1={xp(n-1)} y1={PT} x2={xp(n-1)} y2={yBot} stroke={C.blue} strokeWidth="1" opacity="0.35"/>
-        )}
-
-        {/* X axis labels (every other) */}
-        {scenario.data.map((d,i) => (
-          <text key={i} x={xp(i)} y={H-5} textAnchor="middle" fontSize="8.5"
-            fill={i < n ? C.dgray : '#D1D5DB'}>{d.l}</text>
-        ))}
-      </svg>
-
-      {/* Controls + live stats */}
-      <div className="flex items-center justify-between mt-3 px-1">
-        <button onClick={handlePlay}
-          className="flex items-center gap-2 px-5 py-2 rounded-xl font-bold text-sm transition-all active:scale-95"
-          style={{ background: playing ? '#F3F4F6' : C.darkblue, color: playing ? C.darkblue : '#fff', border: `1.5px solid ${playing ? C.lgray : C.darkblue}` }}>
-          {playing
-            ? <><span style={{ fontSize:'12px' }}>⏸</span> Pause</>
-            : done
-            ? <><span style={{ fontSize:'12px' }}>↺</span> Wiederholen</>
-            : <><span style={{ fontSize:'12px' }}>▶</span> Marktentwicklung abspielen</>
-          }
-        </button>
-
-        {/* Progress bar */}
-        <div className="flex-1 mx-5">
-          <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
-            <div className="h-full rounded-full transition-all duration-300"
-              style={{ width:`${(step/(scenario.data.length-1))*100}%`, background: C.blue }}/>
-          </div>
-          <div className="flex justify-between mt-0.5">
-            <span className="text-xs" style={{ color:'#9CA3AF' }}>{scenario.data[0].l}</span>
-            <span className="text-xs" style={{ color:'#9CA3AF' }}>{scenario.data[scenario.data.length-1].l}</span>
+      <div className="flex gap-5">
+        {/* Chart */}
+        <div className="flex-1">
+          <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{display:'block',overflow:'visible'}}>
+            {[50,100,150,200,250,300].map(v=>(
+              <g key={v}>
+                <line x1={PAD.l} y1={yOf(v)} x2={W-PAD.r} y2={yOf(v)} stroke="#E5E7EB" strokeWidth="1" strokeDasharray="4 3"/>
+                <text x={PAD.l-6} y={yOf(v)+4} fontSize="10" fill="#9CA3AF" textAnchor="end">{v}</text>
+              </g>
+            ))}
+            {monthTicks.map(({i,label})=>(
+              <text key={i} x={xOf(i)} y={H-4} fontSize="9" fill="#6B7280" textAnchor="middle">{label}</text>
+            ))}
+            {step>0 && <path d={mkPath(green)}  stroke="#16A34A" strokeWidth="2"   fill="none" strokeLinecap="round" strokeLinejoin="round"/>}
+            {step>0 && <path d={mkPath(orange)} stroke="#D97706" strokeWidth="2"   fill="none" strokeLinecap="round" strokeLinejoin="round"/>}
+            {step>0 && <path d={mkPath(blue)}   stroke="#2563EB" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>}
+            {EVENTS.map(({e,c})=> step>=e && (
+              <line key={e} x1={xOf(e)} y1={PAD.t} x2={xOf(e)} y2={H-PAD.b} stroke={c} strokeWidth="1.5" strokeDasharray="3 2" opacity="0.7"/>
+            ))}
+            {step>0 && <circle cx={xOf(step)} cy={yOf(blue[step])} r="4" fill="#2563EB" stroke="white" strokeWidth="2"/>}
+          </svg>
+          <div className="flex gap-5 mt-1 text-xs" style={{color:C.dgray}}>
+            {[{c:'#2563EB',l:'Terminmarktpreis'},{c:'#D97706',l:'Stop-Loss'},{c:'#16A34A',l:'Take-Profit (ecoplanet)'}].map(({c,l})=>(
+              <span key={l} className="flex items-center gap-1.5">
+                <span style={{width:18,height:3,background:c,display:'inline-block',borderRadius:2}}/>
+                {l}
+              </span>
+            ))}
+            <span className="ml-auto" style={{color:'#9CA3AF'}}>€/MWh</span>
           </div>
         </div>
-
-        {/* Live KPIs */}
-        <div className="flex gap-4">
-          <div className="text-right">
-            <div className="text-xs" style={{ color:C.dgray }}>ø Marktpreis</div>
-            <div className="font-bold text-sm" style={{ color:C.darkblue }}>{mktAvgNow.toFixed(0)} €/MWh</div>
-          </div>
-          {epAvgNow && (
-            <>
-              <div className="w-px bg-gray-200"/>
-              <div className="text-right">
-                <div className="text-xs" style={{ color:C.dgray }}>ø ecoplanet</div>
-                <div className="font-bold text-sm" style={{ color:C.yellow, WebkitTextStroke:`0.5px ${C.darkblue}` }}>{epAvgNow.toFixed(0)} €/MWh</div>
-              </div>
-              <div className="w-px bg-gray-200"/>
-              <div className="text-right">
-                <div className="text-xs" style={{ color:C.dgray }}>Einsparung</div>
-                <div className="font-bold text-sm" style={{ color:'#16A34A' }}>{savNow.toFixed(1)}%</div>
-              </div>
-            </>
+        {/* Notifications */}
+        <div className="flex flex-col gap-3" style={{width:260,minWidth:260}}>
+          <div className="text-xs font-semibold mb-1" style={{color:C.dgray}}>Handelssignale</div>
+          {notifications.length===0 && (
+            <div className="rounded-lg p-3 text-xs" style={{background:'#F9FAFB',color:'#9CA3AF',border:'1px dashed #E5E7EB'}}>
+              Signale erscheinen während der Animation…
+            </div>
           )}
+          {notifications.map(n=>(
+            <div key={n.id} className="slide-in-right rounded-xl p-4 text-xs"
+              style={{background:n.bg,border:`1.5px solid ${n.border}`}}>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="font-bold text-sm" style={{color:n.color}}>{n.icon}</span>
+                <span className="font-bold" style={{color:n.color}}>{n.title}</span>
+              </div>
+              <div className="font-medium leading-snug mb-1" style={{color:'#1F2937'}}>{n.msg}</div>
+              <div style={{color:'#6B7280'}}>{n.date}</div>
+            </div>
+          ))}
         </div>
+      </div>
+      {/* Controls */}
+      <div className="flex items-center gap-4 mt-4">
+        {step<N-1 && !playing && (
+          <button onClick={()=>setPlaying(true)}
+            className="px-5 py-2 rounded-lg text-sm font-semibold text-white"
+            style={{background:C.darkblue}}>
+            ▶ Abspielen
+          </button>
+        )}
+        {playing && (
+          <button onClick={()=>setPlaying(false)}
+            className="px-5 py-2 rounded-lg text-sm font-semibold"
+            style={{background:'#F3F4F6',color:C.darkblue}}>
+            ⏸ Pause
+          </button>
+        )}
+        {step>0 && (
+          <button onClick={replay}
+            className="px-5 py-2 rounded-lg text-sm font-semibold"
+            style={{background:'#F3F4F6',color:C.darkblue}}>
+            ↺ Wiederholen
+          </button>
+        )}
+        <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{background:'#E5E7EB'}}>
+          <div className="h-full rounded-full transition-all" style={{width:`${(step/(N-1))*100}%`,background:C.darkblue}}/>
+        </div>
+        <span className="text-xs" style={{color:C.dgray}}>{labels[step]||labels[0]}</span>
       </div>
     </div>
   );
@@ -927,12 +878,12 @@ const PortfolioTab = () => {
             </h3>
             <p className="text-xs mt-0.5" style={{ color:C.dgray }}>
               {scenario === 'crisis'
-                ? 'Bollinger-Bänder basiertes Stop-Loss / Take-Profit Modell · Tranchenweiser Einkauf'
+                ? 'EEX CAL-23 · Mär 2022 – Jan 2023 · Stop-Loss / Take-Profit Handelssystem · 4 Fixierungssignale'
                 : 'EEX Terminmarkt Jan–Apr 2026 · Stop-Loss 8,90 ct/kWh · Take-Profit 8,02 ct/kWh'}
             </p>
           </div>
           {scenario === 'crisis'
-            ? <ScenarioChart key="crisis" scenario={SCENARIOS.crisis}/>
+            ? <CrisisChart key="crisis"/>
             : <CurrentMarketChart key="current"/>
           }
         </div>
