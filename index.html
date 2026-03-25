@@ -383,6 +383,263 @@ const StrategieTab = () => {
 };
 
 /* ═══════════════════════════════════════════
+   SCENARIO DATA
+═══════════════════════════════════════════ */
+const SCENARIOS = {
+  crisis: {
+    id: 'crisis',
+    title: 'Energiekrise 2022/2023',
+    subtitle: 'EEX CAL-23 – Terminmarktpreis Strom · Jahresprodukt 2023',
+    yMax: 680,
+    speed: 260,
+    gridY: [0, 150, 300, 450, 600],
+    event: { idx: 8, label: 'Nord Stream II', date: '26.09.2022' },
+    data: [
+      { l:'Jan 22', p:82,  bU:102, bL:64,  buy:null,  note:null },
+      { l:'Feb 22', p:106, bU:130, bL:80,  buy:null,  note:null },
+      { l:'Mrz 22', p:178, bU:148, bL:88,  buy:108,   note:'Stop-Loss ①' },
+      { l:'Apr 22', p:150, bU:192, bL:112, buy:null,  note:null },
+      { l:'Mai 22', p:165, bU:212, bL:128, buy:null,  note:null },
+      { l:'Jun 22', p:218, bU:250, bL:148, buy:162,   note:'Take-Profit ②' },
+      { l:'Jul 22', p:290, bU:305, bL:185, buy:null,  note:null },
+      { l:'Aug 22', p:440, bU:418, bL:242, buy:null,  note:null },
+      { l:'Sep 22', p:598, bU:562, bL:345, buy:388,   note:'Stop-Loss ③' },
+      { l:'Okt 22', p:310, bU:496, bL:275, buy:295,   note:'Take-Profit ④' },
+      { l:'Nov 22', p:218, bU:362, bL:208, buy:null,  note:null },
+      { l:'Dez 22', p:185, bU:290, bL:178, buy:192,   note:'Take-Profit ⑤' },
+      { l:'Jan 23', p:160, bU:246, bL:150, buy:null,  note:null },
+      { l:'Feb 23', p:136, bU:205, bL:126, buy:null,  note:null },
+      { l:'Mrz 23', p:110, bU:170, bL:100, buy:null,  note:null },
+      { l:'Apr 23', p:96,  bU:148, bL:86,  buy:null,  note:null },
+    ],
+  },
+  current: {
+    id: 'current',
+    title: 'Aktuelle Marktsituation',
+    subtitle: 'EEX CAL-25/26 – Terminmarktpreis Strom · aktuell',
+    yMax: 150,
+    speed: 280,
+    gridY: [0, 40, 80, 120],
+    event: null,
+    data: [
+      { l:'Jan 24', p:95,  bU:108, bL:84,  buy:null,  note:null },
+      { l:'Feb 24', p:88,  bU:102, bL:79,  buy:88,    note:'Take-Profit ①' },
+      { l:'Mrz 24', p:92,  bU:101, bL:82,  buy:null,  note:null },
+      { l:'Apr 24', p:85,  bU:97,  bL:76,  buy:null,  note:null },
+      { l:'Mai 24', p:82,  bU:95,  bL:74,  buy:82,    note:'Take-Profit ②' },
+      { l:'Jun 24', p:89,  bU:99,  bL:79,  buy:null,  note:null },
+      { l:'Jul 24', p:96,  bU:107, bL:85,  buy:null,  note:null },
+      { l:'Aug 24', p:92,  bU:105, bL:83,  buy:null,  note:null },
+      { l:'Sep 24', p:86,  bU:100, bL:77,  buy:86,    note:'Take-Profit ③' },
+      { l:'Okt 24', p:90,  bU:101, bL:81,  buy:null,  note:null },
+      { l:'Nov 24', p:88,  bU:100, bL:79,  buy:88,    note:'Take-Profit ④' },
+      { l:'Dez 24', p:93,  bU:104, bL:83,  buy:null,  note:null },
+      { l:'Jan 25', p:88,  bU:101, bL:80,  buy:null,  note:null },
+      { l:'Feb 25', p:84,  bU:97,  bL:76,  buy:84,    note:'Take-Profit ⑤' },
+      { l:'Mrz 25', p:90,  bU:102, bL:81,  buy:null,  note:null },
+      { l:'Apr 25', p:88,  bU:100, bL:79,  buy:null,  note:null },
+    ],
+  },
+};
+
+/* ─── Animated scenario chart ─── */
+const ScenarioChart = ({ scenario }) => {
+  const [step, setStep] = useState(0);
+  const [playing, setPlaying] = useState(false);
+
+  /* Reset on scenario switch */
+  useEffect(() => { setStep(0); setPlaying(false); }, [scenario.id]);
+
+  /* Tick */
+  useEffect(() => {
+    if (!playing) return;
+    if (step >= scenario.data.length - 1) { setPlaying(false); return; }
+    const t = setTimeout(() => setStep(s => s + 1), scenario.speed);
+    return () => clearTimeout(t);
+  }, [playing, step, scenario]);
+
+  const handlePlay = () => {
+    if (step >= scenario.data.length - 1) setStep(0);
+    setPlaying(p => !p);
+  };
+
+  const vis  = scenario.data.slice(0, step + 1);
+  const n    = vis.length;
+  const done = step >= scenario.data.length - 1;
+
+  /* SVG layout */
+  const W=820, H=230, PL=50, PB=30, PT=18, PR=14;
+  const CW=W-PL-PR, CH=H-PT-PB;
+  const xp = i => PL + (i / (scenario.data.length - 1)) * CW;
+  const yp = v => PT + CH - (v / scenario.yMax) * CH;
+  const yBot = PT + CH;
+
+  /* Paths */
+  const mkLine = (arr, key) => arr.map((d,i) => `${i===0?'M':'L'}${xp(i).toFixed(1)},${yp(d[key]).toFixed(1)}`).join(' ');
+
+  const bollFill = n > 1 ? (
+    vis.map((d,i)=>`${i===0?'M':'L'}${xp(i).toFixed(1)},${yp(d.bU).toFixed(1)}`).join(' ') + ' ' +
+    [...vis].reverse().map((d,ri)=>`L${xp(n-1-ri).toFixed(1)},${yp(d.bL).toFixed(1)}`).join(' ') + ' Z'
+  ) : '';
+
+  /* Running ecoplanet average */
+  let epPts = [], runSum = 0, runCnt = 0;
+  vis.forEach((d, i) => {
+    if (d.buy !== null) { runSum += d.buy; runCnt++; }
+    if (runCnt > 0) epPts.push({ i, v: runSum / runCnt });
+  });
+  const epLine = epPts.length > 1
+    ? epPts.map((p,i)=>`${i===0?'M':'L'}${xp(p.i).toFixed(1)},${yp(p.v).toFixed(1)}`).join(' ')
+    : '';
+  const epAvgNow = epPts.length > 0 ? epPts[epPts.length-1].v : null;
+  const mktAvgNow = vis.reduce((a,d)=>a+d.p,0) / Math.max(n,1);
+  const savNow = epAvgNow ? ((mktAvgNow - epAvgNow) / mktAvgNow * 100) : null;
+
+  /* Buy signal indices */
+  const buyIdx = [];
+  vis.forEach((d,i) => { if (d.buy !== null) buyIdx.push(i); });
+
+  return (
+    <div>
+      {/* Legend row */}
+      <div className="flex items-center gap-6 mb-2 px-1">
+        {[
+          { color:C.darkblue, dash:false, label:'Terminmarktpreis' },
+          { color:C.blue,     dash:true,  label:'Bollinger Bänder', fill:true },
+          { color:C.yellow,   dash:true,  label:'ø ecoplanet Einkauf' },
+          { color:C.yellow,   circle:true,label:'Kauf-Signal (Tranche)' },
+        ].map((l,i)=>(
+          <div key={i} className="flex items-center gap-1.5 text-xs" style={{ color:C.dgray }}>
+            {l.circle
+              ? <div className="w-3.5 h-3.5 rounded-full border-2 flex-shrink-0" style={{ background:C.yellow, borderColor:C.darkblue }}/>
+              : l.fill
+              ? <div className="w-6 h-3 rounded-sm flex-shrink-0" style={{ background:C.blue, opacity:0.15, border:`1px dashed ${C.blue}` }}/>
+              : <div className="w-5 h-0 flex-shrink-0" style={{ borderTop:`2px ${l.dash?'dashed':'solid'} ${l.color}` }}/>
+            }
+            {l.label}
+          </div>
+        ))}
+        <div className="ml-auto text-xs" style={{ color:'#9CA3AF' }}>€/MWh</div>
+      </div>
+
+      {/* SVG */}
+      <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ display:'block' }}>
+        {/* Y grid */}
+        {scenario.gridY.map(v=>(
+          <g key={v}>
+            <line x1={PL} y1={yp(v)} x2={W-PR} y2={yp(v)} stroke="#F3F4F6" strokeWidth="1"/>
+            <text x={PL-5} y={yp(v)+3.5} textAnchor="end" fontSize="9" fill="#9CA3AF">{v}</text>
+          </g>
+        ))}
+        <line x1={PL} y1={yBot} x2={W-PR} y2={yBot} stroke="#E5E7EB" strokeWidth="1"/>
+
+        {/* Bollinger band fill */}
+        {bollFill && <path d={bollFill} fill={C.blue} opacity="0.07"/>}
+        {n>1 && <path d={mkLine(vis,'bU')} fill="none" stroke={C.lblue} strokeWidth="0.9" strokeDasharray="4,2" opacity="0.55"/>}
+        {n>1 && <path d={mkLine(vis,'bL')} fill="none" stroke={C.lblue} strokeWidth="0.9" strokeDasharray="4,2" opacity="0.55"/>}
+
+        {/* ecoplanet avg line */}
+        {epLine && <path d={epLine} fill="none" stroke={C.yellow} strokeWidth="2.2" strokeDasharray="6,3"/>}
+
+        {/* Market price line */}
+        {n>0 && <path d={mkLine(vis,'p')} fill="none" stroke={C.darkblue} strokeWidth="2" strokeLinejoin="round"/>}
+
+        {/* Nord Stream event annotation */}
+        {scenario.event && step >= scenario.event.idx && (() => {
+          const ex = xp(scenario.event.idx);
+          return (
+            <g>
+              <line x1={ex} y1={PT} x2={ex} y2={yBot} stroke="#EF4444" strokeWidth="1" strokeDasharray="4,3" opacity="0.7"/>
+              <rect x={ex+4} y={PT+2} width="88" height="26" rx="3" fill="#FEF2F2" stroke="#FCA5A5" strokeWidth="0.8"/>
+              <text x={ex+8} y={PT+13} fontSize="8" fontWeight="bold" fill="#DC2626">{scenario.event.label}</text>
+              <text x={ex+8} y={PT+23} fontSize="7.5" fill="#EF4444">{scenario.event.date}</text>
+            </g>
+          );
+        })()}
+
+        {/* Buy signal markers */}
+        {buyIdx.map(i => {
+          const d = vis[i];
+          const cx = xp(i), cy = yp(d.p);
+          const labelAbove = i < scenario.data.length * 0.8;
+          return (
+            <g key={i}>
+              <line x1={cx} y1={PT} x2={cx} y2={yBot} stroke={C.yellow} strokeWidth="0.8" strokeDasharray="3,3" opacity="0.5"/>
+              <circle cx={cx} cy={cy} r="6" fill={C.yellow} stroke={C.darkblue} strokeWidth="1.5"/>
+              <text x={cx} y={cy+(labelAbove?-11:16)} textAnchor="middle" fontSize="8" fontWeight="bold" fill={C.darkblue}>
+                {d.buy}€
+              </text>
+              {d.note && (
+                <text x={cx} y={cy+(labelAbove?-21:26)} textAnchor="middle" fontSize="7.5" fill={C.dgray}>{d.note}</text>
+              )}
+            </g>
+          );
+        })}
+
+        {/* Live cursor */}
+        {!done && n>0 && (
+          <line x1={xp(n-1)} y1={PT} x2={xp(n-1)} y2={yBot} stroke={C.blue} strokeWidth="1" opacity="0.35"/>
+        )}
+
+        {/* X axis labels (every other) */}
+        {scenario.data.map((d,i) => (
+          <text key={i} x={xp(i)} y={H-5} textAnchor="middle" fontSize="8.5"
+            fill={i < n ? C.dgray : '#D1D5DB'}>{d.l}</text>
+        ))}
+      </svg>
+
+      {/* Controls + live stats */}
+      <div className="flex items-center justify-between mt-3 px-1">
+        <button onClick={handlePlay}
+          className="flex items-center gap-2 px-5 py-2 rounded-xl font-bold text-sm transition-all active:scale-95"
+          style={{ background: playing ? '#F3F4F6' : C.darkblue, color: playing ? C.darkblue : '#fff', border: `1.5px solid ${playing ? C.lgray : C.darkblue}` }}>
+          {playing
+            ? <><span style={{ fontSize:'12px' }}>⏸</span> Pause</>
+            : done
+            ? <><span style={{ fontSize:'12px' }}>↺</span> Wiederholen</>
+            : <><span style={{ fontSize:'12px' }}>▶</span> Marktentwicklung abspielen</>
+          }
+        </button>
+
+        {/* Progress bar */}
+        <div className="flex-1 mx-5">
+          <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+            <div className="h-full rounded-full transition-all duration-300"
+              style={{ width:`${(step/(scenario.data.length-1))*100}%`, background: C.blue }}/>
+          </div>
+          <div className="flex justify-between mt-0.5">
+            <span className="text-xs" style={{ color:'#9CA3AF' }}>{scenario.data[0].l}</span>
+            <span className="text-xs" style={{ color:'#9CA3AF' }}>{scenario.data[scenario.data.length-1].l}</span>
+          </div>
+        </div>
+
+        {/* Live KPIs */}
+        <div className="flex gap-4">
+          <div className="text-right">
+            <div className="text-xs" style={{ color:C.dgray }}>ø Marktpreis</div>
+            <div className="font-bold text-sm" style={{ color:C.darkblue }}>{mktAvgNow.toFixed(0)} €/MWh</div>
+          </div>
+          {epAvgNow && (
+            <>
+              <div className="w-px bg-gray-200"/>
+              <div className="text-right">
+                <div className="text-xs" style={{ color:C.dgray }}>ø ecoplanet</div>
+                <div className="font-bold text-sm" style={{ color:C.yellow, WebkitTextStroke:`0.5px ${C.darkblue}` }}>{epAvgNow.toFixed(0)} €/MWh</div>
+              </div>
+              <div className="w-px bg-gray-200"/>
+              <div className="text-right">
+                <div className="text-xs" style={{ color:C.dgray }}>Einsparung</div>
+                <div className="font-bold text-sm" style={{ color:'#16A34A' }}>{savNow.toFixed(1)}%</div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════
    PORTFOLIOMANAGEMENT TAB
 ═══════════════════════════════════════════ */
 const PM_COMPS = [
@@ -395,6 +652,7 @@ const OPTIMAL = { term:40, spot:30, wind:21, solar:9 };
 const MONTHLY_LOAD = [1180,1050,1080,980,920,850,830,860,960,1040,1120,1240];
 
 const PortfolioTab = () => {
+  const [scenario, setScenario] = useState('crisis');
   const [mix, setMix] = useState({ term:40, spot:30, wind:20, solar:10 });
   const [animating, setAnimating] = useState(false);
 
@@ -409,6 +667,34 @@ const PortfolioTab = () => {
 
   return (
     <div className="max-w-screen-xl mx-auto px-8 py-6 flex flex-col gap-5">
+
+      {/* ── Scenario slides ── */}
+      <div className="bg-white rounded-2xl border overflow-hidden" style={{ borderColor:C.lgray }}>
+        {/* Slide selector */}
+        <div className="flex border-b" style={{ borderColor:'#F3F4F6' }}>
+          {Object.values(SCENARIOS).map(sc => (
+            <button key={sc.id} onClick={() => setScenario(sc.id)}
+              className="flex-1 px-6 py-4 text-left transition-all"
+              style={{ background: scenario===sc.id ? '#F9FAFB' : 'white', borderBottom: scenario===sc.id ? `3px solid ${C.blue}` : '3px solid transparent' }}>
+              <div className="text-sm font-bold" style={{ color: scenario===sc.id ? C.darkblue : C.dgray }}>{sc.title}</div>
+              <div className="text-xs mt-0.5" style={{ color:'#9CA3AF' }}>{sc.subtitle}</div>
+            </button>
+          ))}
+        </div>
+        {/* Chart */}
+        <div className="p-6">
+          <div className="mb-2">
+            <h3 className="font-bold text-base" style={{ color:C.darkblue }}>
+              Marktfolgesystem — {SCENARIOS[scenario].title}
+            </h3>
+            <p className="text-xs mt-0.5" style={{ color:C.dgray }}>
+              Bollinger-Bänder basiertes Stop-Loss / Take-Profit Modell · Tranchenweiser Einkauf
+            </p>
+          </div>
+          <ScenarioChart key={scenario} scenario={SCENARIOS[scenario]}/>
+        </div>
+      </div>
+
       <div className="grid gap-5" style={{ gridTemplateColumns:'1fr 320px' }}>
 
         {/* Lastgang chart */}
