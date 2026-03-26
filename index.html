@@ -522,10 +522,10 @@ const SCENARIOS = {
 ═══════════════════════════════════════════ */
 const CRISIS_DATA = (() => {
   // 248 trading days: 2022-03-04 → 2023-02-22
+  // UA=0   (24.02.2022): Überfall Russlands auf die Ukraine (vor Datenbeginn → Index 0)
   // F1=13  (23.03.2022): Erste Fixierung Stop-Loss  @ 122,00 €/MWh
   // F2=61  (01.06.2022): Zweite Fixierung Stop-Loss @ 188,39 €/MWh
-  // F3=132 (08.09.2022): Dritte Fixierung Stop-Loss @ 245,33 €/MWh
-  // NS=143 (27.09.2022): Nord Stream II Explosion (nearest trading day to 26.09.)
+  // F3=109 (08.08.2022): Dritte Fixierung Stop-Loss @ 234,50 €/MWh
   // F4=188 (30.11.2022): Vierte Fixierung Stop-Loss @ 261,00 €/MWh
   // F5=237 (08.02.2023): Fünfte Fixierung Take-Profit @ 163,50 €/MWh
   const MO = ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
@@ -638,41 +638,41 @@ const CRISIS_DATA = (() => {
     170.64,173.78,174.80,177.25,179.49,178.11,177.06,175.81,
   ];
   const N = 248;
-  const F1=13, F2=61, F3=132, NS=143, F4=188, F5=237;
-  return { labels, blue, orange, green, N, F1, F2, F3, NS, F4, F5 };
+  const UA=0, F1=13, F2=61, F3=109, F4=188, F5=237;
+  return { labels, blue, orange, green, N, UA, F1, F2, F3, F4, F5 };
 })();
 
 const CrisisChart = () => {
   const [step, setStep] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [notifications, setNotifications] = useState([]);
-  const { labels, blue, orange, green, N, F1, F2, F3, NS, F4, F5 } = CRISIS_DATA;
+  const { labels, blue, orange, green, N, UA, F1, F2, F3, F4, F5 } = CRISIS_DATA;
 
   useEffect(() => {
     if (!playing) return;
     if (step >= N-1) { setPlaying(false); return; }
-    const t = setTimeout(() => setStep(s=>s+1), 25);
+    const t = setTimeout(() => setStep(s=>s+1), 50);
     return () => clearTimeout(t);
   }, [playing, step]);
 
   useEffect(() => {
     const EVTS = [
+      { id:0, at:UA, color:'#991B1B', bg:'#FEE2E2', border:'#FCA5A5', icon:'⚡',
+        title:'Geopolitisches Ereignis', msg:'Überfall Russlands auf die Ukraine', date:"24. Feb '22" },
       { id:1, at:F1, color:'#166534', bg:'#DCFCE7', border:'#86EFAC', icon:'✓',
         title:'Erste Fixierung', msg:`Stop-Loss — Fixierungspreis: ${blue[F1].toFixed(2).replace('.',',')} €/MWh` },
       { id:2, at:F2, color:'#166534', bg:'#DCFCE7', border:'#86EFAC', icon:'✓',
         title:'Zweite Fixierung', msg:`Stop-Loss — Fixierungspreis: ${blue[F2].toFixed(2).replace('.',',')} €/MWh` },
       { id:3, at:F3, color:'#166534', bg:'#DCFCE7', border:'#86EFAC', icon:'✓',
         title:'Dritte Fixierung', msg:`Stop-Loss — Fixierungspreis: ${blue[F3].toFixed(2).replace('.',',')} €/MWh` },
-      { id:4, at:NS, color:'#991B1B', bg:'#FEE2E2', border:'#FCA5A5', icon:'💥',
-        title:'Nord Stream II', msg:'Explosion der Nord Stream II Pipeline' },
-      { id:5, at:F4, color:'#166534', bg:'#DCFCE7', border:'#86EFAC', icon:'✓',
+      { id:4, at:F4, color:'#166534', bg:'#DCFCE7', border:'#86EFAC', icon:'✓',
         title:'Vierte Fixierung', msg:`Stop-Loss — Fixierungspreis: ${blue[F4].toFixed(2).replace('.',',')} €/MWh` },
-      { id:6, at:F5, color:'#1E40AF', bg:'#EFF6FF', border:'#BFDBFE', icon:'★',
+      { id:5, at:F5, color:'#92400E', bg:'#FEF3C7', border:'#FCD34D', icon:'🛡',
         title:'Fünfte Fixierung', msg:`Take-Profit — Fixierungspreis: ${blue[F5].toFixed(2).replace('.',',')} €/MWh` },
     ];
     EVTS.forEach(evt => {
       if (step === evt.at)
-        setNotifications(prev => prev.find(n=>n.id===evt.id) ? prev : [...prev, { ...evt, date: labels[evt.at] }]);
+        setNotifications(prev => prev.find(n=>n.id===evt.id) ? prev : [...prev, { ...evt, date: evt.date || labels[evt.at] }]);
     });
   }, [step]);
 
@@ -699,7 +699,7 @@ const CrisisChart = () => {
   ];
   const allEvts = [
     {e:F1,c:'#16A34A'},{e:F2,c:'#16A34A'},{e:F3,c:'#16A34A'},
-    {e:NS,c:'#DC2626'},{e:F4,c:'#16A34A'},{e:F5,c:'#2563EB'},
+    {e:F4,c:'#16A34A'},{e:F5,c:'#D97706'},
   ];
 
   return (
@@ -887,7 +887,7 @@ const CurrentMarketChart = () => {
   useEffect(() => {
     if (!playing) return;
     if (step >= N - 1) { setPlaying(false); return; }
-    const t = setTimeout(() => setStep(s => s + 1), 50);
+    const t = setTimeout(() => setStep(s => s + 1), 80);
     return () => clearTimeout(t);
   }, [playing, step]);
 
