@@ -517,164 +517,190 @@ const SCENARIOS = {
 };
 
 /* ═══════════════════════════════════════════
-   CRISIS CHART (Mar 2022 – Jan 2023)
+   CRISIS CHART (Mär 2022 – Feb 2023)
+   Data: EEX DEB CAL-2024, CSV export
 ═══════════════════════════════════════════ */
 const CRISIS_DATA = (() => {
-  const rng = makeRng(42);
-  const N = 340; // Mar 1, 2022 – Jan 31, 2023
-
-  // Dense waypoints every ~7 days, hand-traced from uploaded image
-  // [day, blue(Terminmarkt), orange(Stop-Loss), green(Take-Profit/ecoplanet)]
-  const wp = [
-    [0,   96,  100,  84],   // 01 Mär '22
-    [7,   104, 106,  81],   // 08 Mär
-    [14,  113, 112,  77],   // 15 Mär
-    [21,  126, 119,  73],   // 22 Mär
-    [28,  138, 127,  69],   // 29 Mär
-    [35,  149, 134,  65],   // 05 Apr
-    [42,  158, 140,  62],   // 12 Apr
-    [49,  164, 146,  59],   // 19 Apr
-    [56,  166, 152,  56],   // 26 Apr
-    [63,  167, 157,  53],   // 03 Mai
-    [70,  163, 162,  52],   // 10 Mai – green trough & blue local peak
-    [77,  157, 164,  54],   // 17 Mai
-    [84,  151, 166,  58],   // 24 Mai
-    [91,  142, 168,  65],   // 31 Mai
-    [98,  134, 169,  73],   // 07 Jun – blue dips (local low)
-    [105, 142, 170,  82],   // 14 Jun
-    [112, 150, 172,  91],   // 21 Jun
-    [119, 148, 174,  99],   // 28 Jun
-    [126, 152, 176, 108],   // 05 Jul
-    [133, 158, 178, 116],   // 12 Jul
-    [140, 163, 181, 122],   // 19 Jul
-    [147, 169, 184, 127],   // 26 Jul
-    [154, 174, 187, 129],   // 02 Aug
-    [161, 184, 192, 131],   // 09 Aug
-    [168, 198, 198, 132],   // 16 Aug
-    [175, 214, 208, 132],   // 23 Aug – E1: blue crosses above SL
-    [182, 238, 228, 133],   // 30 Aug
-    [189, 258, 245, 133],   // 06 Sep
-    [196, 274, 257, 132],   // 13 Sep
-    [203, 281, 263, 131],   // 20 Sep
-    [207, 283, 265, 128],   // 24 Sep
-    [209, 284, 266,  68],   // 26 Sep – E2: Nord Stream (green crashes instantly)
-    [211, 268, 255,  67],   // 28 Sep
-    [213, 238, 232,  67],   // 30 Sep
-    [215, 208, 210,  67],   // 02 Okt
-    [217, 192, 195,  68],   // 04 Okt
-    [218, 184, 190, 188],   // 05 Okt – E3: blue below SL, green jumps
-    [221, 177, 191, 186],   // 08 Okt
-    [228, 172, 191, 183],   // 15 Okt
-    [235, 175, 192, 180],   // 22 Okt
-    [242, 170, 193, 177],   // 29 Okt
-    [249, 168, 194, 174],   // 05 Nov
-    [256, 172, 195, 171],   // 12 Nov
-    [263, 175, 196, 168],   // 19 Nov
-    [270, 172, 197, 166],   // 26 Nov
-    [277, 170, 198, 164],   // 03 Dez
-    [284, 173, 199, 162],   // 10 Dez
-    [291, 170, 200, 161],   // 17 Dez
-    [298, 163, 201, 161],   // 24 Dez
-    [306, 155, 202, 162],   // 01 Jan '23
-    [310, 165, 202, 162],   // 05 Jan
-    [314, 156, 203, 161],   // 09 Jan – E4: blue crosses below green
-    [319, 147, 203, 157],   // 14 Jan
-    [326, 142, 204, 146],   // 21 Jan
-    [333, 137, 204, 133],   // 28 Jan
-    [337, 133, 205, 124],   // 01 Feb
+  // 248 trading days: 2022-03-04 → 2023-02-22
+  // F1=13  (23.03.2022): Erste Fixierung Stop-Loss  @ 122,00 €/MWh
+  // F2=61  (01.06.2022): Zweite Fixierung Stop-Loss @ 188,39 €/MWh
+  // F3=132 (08.09.2022): Dritte Fixierung Stop-Loss @ 245,33 €/MWh
+  // NS=143 (27.09.2022): Nord Stream II Explosion (nearest trading day to 26.09.)
+  // F4=188 (30.11.2022): Vierte Fixierung Stop-Loss @ 261,00 €/MWh
+  // F5=237 (08.02.2023): Fünfte Fixierung Take-Profit @ 163,50 €/MWh
+  const MO = ['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'];
+  const rawDates = [
+    '04.03.22','07.03.22','08.03.22','09.03.22','10.03.22','11.03.22','14.03.22','15.03.22','16.03.22','17.03.22',
+    '18.03.22','21.03.22','22.03.22','23.03.22','24.03.22','25.03.22','28.03.22','29.03.22','30.03.22','31.03.22',
+    '01.04.22','04.04.22','05.04.22','06.04.22','07.04.22','08.04.22','11.04.22','12.04.22','13.04.22','14.04.22',
+    '19.04.22','20.04.22','21.04.22','22.04.22','25.04.22','26.04.22','27.04.22','28.04.22','29.04.22',
+    '02.05.22','03.05.22','04.05.22','05.05.22','06.05.22','09.05.22','10.05.22','11.05.22','12.05.22','13.05.22',
+    '16.05.22','17.05.22','18.05.22','19.05.22','20.05.22','23.05.22','24.05.22','25.05.22','26.05.22','27.05.22',
+    '30.05.22','31.05.22',
+    '01.06.22','02.06.22','03.06.22','06.06.22','07.06.22','08.06.22','09.06.22','10.06.22',
+    '13.06.22','14.06.22','15.06.22','16.06.22','17.06.22','20.06.22','21.06.22','22.06.22','23.06.22','24.06.22',
+    '27.06.22','28.06.22','29.06.22','30.06.22',
+    '01.07.22','04.07.22','05.07.22','06.07.22','07.07.22','08.07.22',
+    '11.07.22','12.07.22','13.07.22','14.07.22','15.07.22','18.07.22','19.07.22','20.07.22','21.07.22','22.07.22',
+    '25.07.22','26.07.22','27.07.22','28.07.22','29.07.22',
+    '01.08.22','02.08.22','03.08.22','04.08.22','05.08.22','08.08.22','09.08.22','10.08.22','11.08.22','12.08.22',
+    '15.08.22','16.08.22','17.08.22','18.08.22','19.08.22','22.08.22','23.08.22','24.08.22','25.08.22','26.08.22',
+    '29.08.22','30.08.22','31.08.22',
+    '01.09.22','02.09.22','05.09.22','06.09.22','07.09.22','08.09.22','09.09.22',
+    '12.09.22','13.09.22','14.09.22','15.09.22','16.09.22','19.09.22','20.09.22','22.09.22','23.09.22',
+    '27.09.22','28.09.22','29.09.22','30.09.22',
+    '03.10.22','04.10.22','06.10.22','07.10.22','10.10.22','11.10.22','12.10.22','13.10.22','14.10.22',
+    '17.10.22','18.10.22','19.10.22','20.10.22','21.10.22','24.10.22','25.10.22','26.10.22','27.10.22','28.10.22',
+    '31.10.22',
+    '01.11.22','02.11.22','03.11.22','04.11.22','07.11.22','08.11.22','09.11.22','10.11.22','11.11.22',
+    '14.11.22','15.11.22','16.11.22','17.11.22','18.11.22','21.11.22','22.11.22','23.11.22','24.11.22','25.11.22',
+    '28.11.22','29.11.22','30.11.22',
+    '01.12.22','02.12.22','05.12.22','06.12.22','07.12.22','08.12.22','09.12.22',
+    '12.12.22','13.12.22','14.12.22','15.12.22','16.12.22','19.12.22','20.12.22','21.12.22','22.12.22','23.12.22',
+    '27.12.22','28.12.22','29.12.22','30.12.22',
+    '02.01.23','03.01.23','04.01.23','05.01.23','06.01.23','09.01.23','10.01.23','11.01.23','12.01.23','13.01.23',
+    '16.01.23','17.01.23','18.01.23','19.01.23','20.01.23','23.01.23','24.01.23','25.01.23','26.01.23','27.01.23',
+    '30.01.23','31.01.23',
+    '01.02.23','02.02.23','03.02.23','06.02.23','07.02.23','08.02.23','09.02.23','10.02.23',
+    '13.02.23','14.02.23','15.02.23','16.02.23','17.02.23','20.02.23','21.02.23','22.02.23',
   ];
-
-  const lerp = (a,b,t) => a+(b-a)*t;
-  const interp = (day, col) => {
-    for (let j=0; j<wp.length-1; j++) {
-      if (day>=wp[j][0] && day<=wp[j+1][0]) {
-        const t=(day-wp[j][0])/(wp[j+1][0]-wp[j][0]);
-        return lerp(wp[j][col], wp[j+1][col], t);
-      }
-    }
-    return wp[wp.length-1][col];
-  };
-
-  const blue=[], orange=[], green=[], labels=[];
-  const start = new Date(2022,2,1);
-  for (let i=0; i<N; i++) {
-    const d = new Date(start); d.setDate(start.getDate()+i);
-    const mo=['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'][d.getMonth()];
-    labels.push(`${d.getDate()}. ${mo} '${String(d.getFullYear()).slice(2)}`);
-    // Noise matching image: blue ±14 (very volatile), orange ±6, green ±9
-    blue.push(  +(interp(i,1)+(rng()-0.5)*14).toFixed(1));
-    orange.push(+(interp(i,2)+(rng()-0.5)*6 ).toFixed(1));
-    green.push( +(interp(i,3)+(rng()-0.5)*9 ).toFixed(1));
-  }
-
-  // Force exact crossing values (overrides noise at event days)
-  const E1=175, E2=209, E3=218, E4=314;
-  blue[E1]=214;  orange[E1]=208;                // E1: blue (214) > orange (208)
-  blue[E2]=284;  orange[E2]=266; green[E2]=68;  // E2: Nord Stream peak
-  blue[E3]=184;  orange[E3]=190; green[E3]=188; // E3: blue (184) < orange (190)
-  blue[E4]=156;  green[E4] =161;                // E4: blue (156) < green (161)
-
-  return { labels, blue, orange, green, N, E1, E2, E3, E4 };
+  const labels = rawDates.map(d => { const [dd,mm,yy]=d.split('.'); return `${+dd}. ${MO[+mm-1]} '${yy}`; });
+  // Terminmarktpreis (€/MWh)
+  const blue = [
+    118,118.11,120.35,117.25,116.6,116.72,115.78,112.36,111.5,112,112.18,112,
+    115.15,122,122.25,121.6,120.47,122.5,121.75,120.25,121.25,123.6,128,129.5,
+    133.5,137.5,139.08,147,152.45,151.42,153.5,164.65,170.21,172.7,172.6,165.5,
+    167.5,164.25,165.38,164.25,166.25,178,188,188,183,181.24,187,191,
+    189.25,187,189.5,187.91,183.9,186.25,178.61,180.8,183.01,183.05,183,181.25,
+    185.97,188.39,189.98,195,193.99,189.84,184.9,181.2,170.82,168.01,173.51,175.7,
+    177.24,171,166.54,165.23,170.05,170.84,166.57,165.92,166.73,174.05,187.31,190.78,
+    202.89,206.96,214,232,229.75,228.77,230.38,229.51,225,215.88,217.33,219.14,
+    204.82,205.85,208.07,207.17,219.67,218.2,214,207.5,216.88,226.62,228.82,234.85,
+    234.21,234.5,236,257.52,284.77,287.5,292,321,321.33,339,358.5,388.74,
+    365.66,361.75,392.3,471.67,405,357.63,304.25,260,235.5,258,253,248.25,
+    245.33,244.71,237,237.5,244.5,255,239,236.25,247,248,244,250,
+    253.75,245,243,239,239.5,261,267,271,268.5,268,268,260,
+    254.5,251.5,257,260.5,255,246,249,249,258,268,257.5,258,
+    258.25,257.5,247,240,237.5,240.1,241.5,238,234.25,245,243.25,243,
+    236,241,248,253,248,251,249,251.85,261,267.5,270,271,
+    280,290,282.5,285,280,274,258.5,259.5,242,230,237,233.5,
+    232.5,230,227.25,225,228,215,216.55,212.75,190.75,195,192,197.5,
+    194,178,181,169.5,153,168.2,179,183,189,179.5,165,167,
+    162,166,171.5,180,187,181.5,181,173,165.75,163.5,162.5,166.25,
+    161,159,163.5,161.6,158.5,155,154,150,
+  ];
+  // Stop-Loss (€/MWh)
+  const orange = [
+    116.35,116.57,116.59,116.88,116.62,116.28,115.95,115.84,115.75,115.68,115.31,115.29,
+    115.19,115.34,116.09,116.83,117.35,117.82,118.52,119.13,119.38,119.40,119.35,119.92,
+    120.75,122.66,125.18,127.64,131.15,134.73,137.73,140.63,145.05,150.19,155.00,159.20,
+    161.78,164.26,166.16,167.81,168.87,169.76,171.66,174.44,176.65,178.11,179.56,181.31,
+    183.11,184.23,184.96,185.44,185.12,184.00,182.76,181.06,179.37,178.00,176.68,175.06,
+    174.15,173.84,173.19,172.56,173.80,175.29,176.47,177.34,177.44,178.08,178.52,178.64,
+    178.35,178.11,179.57,181.51,183.41,184.82,186.08,187.52,188.66,189.70,190.42,191.26,
+    192.50,195.47,198.76,203.01,210.17,215.62,220.25,224.62,228.22,230.94,232.55,234.22,
+    236.08,236.89,237.79,238.67,239.36,240.19,240.31,240.21,239.83,239.97,240.17,239.72,
+    239.18,238.73,238.00,236.26,236.40,241.02,245.81,251.95,262.98,272.72,284.34,298.02,
+    315.86,326.99,336.26,348.94,373.70,384.07,388.05,388.55,388.32,387.68,386.70,385.73,
+    384.65,384.42,384.18,383.93,383.12,382.69,382.61,383.21,384.30,384.94,385.45,385.94,
+    387.24,388.88,390.67,392.34,393.25,393.95,393.31,391.09,385.51,381.83,273.48,275.09,
+    275.22,274.81,274.27,274.09,274.23,273.92,273.41,272.93,272.48,272.45,273.41,273.29,
+    272.74,272.68,272.84,272.07,271.30,271.68,271.88,271.79,272.18,272.84,272.70,272.52,
+    272.06,272.06,272.04,271.36,270.22,269.16,268.07,266.78,266.39,267.03,268.54,270.11,
+    271.53,274.53,278.89,281.38,284.20,286.06,286.75,287.08,287.49,287.75,288.63,288.97,
+    289.12,289.11,289.54,290.24,290.96,291.23,292.62,293.55,294.59,297.79,300.05,302.27,
+    303.61,305.13,307.83,309.66,312.01,315.21,315.87,315.03,313.48,310.28,305.57,302.04,
+    297.14,292.29,287.06,283.02,277.97,274.58,272.15,268.66,265.44,262.24,258.79,255.26,
+    251.33,246.56,243.29,238.79,234.26,232.67,230.63,228.78,
+  ];
+  // Take-Profit (€/MWh)
+  const green = [
+    82.79,83.33,84.11,84.62,85.64,86.69,87.72,88.40,88.89,89.30,90.10,90.45,
+    90.89,91.13,90.86,90.61,90.57,91.15,91.24,91.44,92.07,93.02,94.16,94.75,
+    95.13,94.34,92.86,91.54,89.20,87.04,85.58,84.25,81.43,77.87,74.75,72.26,
+    71.40,70.68,70.70,70.90,71.81,72.93,73.25,72.83,73.11,74.21,75.15,75.91,
+    76.84,78.63,80.87,83.47,86.96,91.05,95.13,99.34,104.02,108.62,113.04,117.82,
+    121.64,124.58,128.02,131.42,132.78,133.83,135.09,136.60,139.06,140.48,142.03,144.18,
+    146.93,149.56,149.57,148.81,148.07,148.17,148.40,148.29,148.58,148.97,149.96,151.14,
+    151.89,150.78,149.28,146.77,141.01,137.09,134.20,131.63,129.55,128.22,127.82,127.41,
+    127.10,127.48,127.92,128.43,129.17,130.13,131.49,132.59,133.80,134.89,136.34,138.48,
+    140.79,143.05,145.73,149.66,152.09,150.10,147.91,144.48,135.96,128.97,120.29,109.77,
+    95.25,88.08,82.99,74.73,54.15,49.10,50.42,54.27,57.51,60.74,65.34,69.53,
+    73.61,76.44,79.50,82.47,86.18,89.51,92.77,94.74,96.01,98.22,100.36,101.87,
+    102.46,102.32,101.51,100.51,99.64,99.12,101.14,105.28,113.81,120.05,221.47,221.45,
+    222.23,223.03,223.68,224.38,224.97,225.60,225.70,226.03,226.36,226.85,226.80,227.28,
+    228.33,228.74,228.82,229.39,229.56,228.19,227.23,226.75,225.50,223.76,223.61,223.46,
+    223.64,222.93,222.52,223.27,224.84,226.07,227.48,229.04,229.61,229.27,228.08,226.90,
+    225.92,223.29,219.29,217.30,215.57,214.58,214.42,214.74,215.10,214.59,212.81,212.12,
+    211.32,210.53,209.43,207.97,206.54,205.78,202.31,199.26,195.77,188.86,183.29,177.67,
+    173.64,169.48,163.35,158.22,151.87,144.04,140.30,138.72,138.19,139.60,142.16,143.10,
+    145.81,148.27,151.38,153.59,157.66,160.01,160.85,162.94,164.53,165.96,167.21,168.60,
+    170.64,173.78,174.80,177.25,179.49,178.11,177.06,175.81,
+  ];
+  const N = 248;
+  const F1=13, F2=61, F3=132, NS=143, F4=188, F5=237;
+  return { labels, blue, orange, green, N, F1, F2, F3, NS, F4, F5 };
 })();
 
 const CrisisChart = () => {
   const [step, setStep] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [notifications, setNotifications] = useState([]);
-  const { labels, blue, orange, green, N, E1, E2, E3, E4 } = CRISIS_DATA;
+  const { labels, blue, orange, green, N, F1, F2, F3, NS, F4, F5 } = CRISIS_DATA;
 
   useEffect(() => {
     if (!playing) return;
     if (step >= N-1) { setPlaying(false); return; }
-    const t = setTimeout(() => setStep(s=>s+1), 35);
+    const t = setTimeout(() => setStep(s=>s+1), 25);
     return () => clearTimeout(t);
   }, [playing, step]);
 
   useEffect(() => {
-    const add = (id,color,bg,border,icon,title,msg,date) =>
-      setNotifications(prev => prev.find(n=>n.id===id) ? prev : [...prev,{id,color,bg,border,icon,title,msg,date}]);
-    if (step===E1) add(1,'#92400E','#FEF3C7','#FCD34D','⚠',
-      'Stop-Loss Warnung',
-      'Marktpreis überschreitet Stop-Loss — erhöhte Marktvolatilität',
-      labels[E1]);
-    if (step===E2) add(2,'#991B1B','#FEF2F2','#FCA5A5','💥',
-      'Explosion Nord Stream II',
-      'Direkte Fixierung auf Grund von Stop-Loss zu 265 €/MWh',
-      '26. Sep \'22');
-    if (step===E3) add(3,'#1E40AF','#EFF6FF','#BFDBFE','↓',
-      'Marktkorrektur',
-      'Marktpreis fällt unter Stop-Loss — Normalisierung der Marktlage',
-      labels[E3]);
-    if (step===E4) add(4,'#166534','#DCFCE7','#86EFAC','✓',
-      'Take-Profit ausgelöst',
-      'Marktpreis unterschreitet Take-Profit — günstige Fixierungsmöglichkeit',
-      labels[E4]);
+    const EVTS = [
+      { id:1, at:F1, color:'#166534', bg:'#DCFCE7', border:'#86EFAC', icon:'✓',
+        title:'Erste Fixierung', msg:`Stop-Loss — Fixierungspreis: ${blue[F1].toFixed(2).replace('.',',')} €/MWh` },
+      { id:2, at:F2, color:'#166534', bg:'#DCFCE7', border:'#86EFAC', icon:'✓',
+        title:'Zweite Fixierung', msg:`Stop-Loss — Fixierungspreis: ${blue[F2].toFixed(2).replace('.',',')} €/MWh` },
+      { id:3, at:F3, color:'#166534', bg:'#DCFCE7', border:'#86EFAC', icon:'✓',
+        title:'Dritte Fixierung', msg:`Stop-Loss — Fixierungspreis: ${blue[F3].toFixed(2).replace('.',',')} €/MWh` },
+      { id:4, at:NS, color:'#991B1B', bg:'#FEE2E2', border:'#FCA5A5', icon:'💥',
+        title:'Nord Stream II', msg:'Explosion der Nord Stream II Pipeline' },
+      { id:5, at:F4, color:'#166534', bg:'#DCFCE7', border:'#86EFAC', icon:'✓',
+        title:'Vierte Fixierung', msg:`Stop-Loss — Fixierungspreis: ${blue[F4].toFixed(2).replace('.',',')} €/MWh` },
+      { id:6, at:F5, color:'#1E40AF', bg:'#EFF6FF', border:'#BFDBFE', icon:'★',
+        title:'Fünfte Fixierung', msg:`Take-Profit — Fixierungspreis: ${blue[F5].toFixed(2).replace('.',',')} €/MWh` },
+    ];
+    EVTS.forEach(evt => {
+      if (step === evt.at)
+        setNotifications(prev => prev.find(n=>n.id===evt.id) ? prev : [...prev, { ...evt, date: labels[evt.at] }]);
+    });
   }, [step]);
 
   const replay = () => { setStep(0); setNotifications([]); setPlaying(true); };
 
+  // Live KPI calculations
+  const avgMarket = step >= 0 ? blue.slice(0,step+1).reduce((a,b)=>a+b,0)/(step+1) : 0;
+  const fixIndices = [F1,F2,F3,F4,F5];
+  const fixPrices = fixIndices.filter(i => step >= i).map(i => blue[i]);
+  const avgFix = fixPrices.length > 0 ? fixPrices.reduce((a,b)=>a+b,0)/fixPrices.length : null;
+  const done = step >= N-1;
+  const savingsPct = done && avgFix != null ? (avgMarket - avgFix)/avgMarket*100 : null;
+
   const W=820, H=260, PAD={l:52,r:20,t:16,b:32};
   const cw=W-PAD.l-PAD.r, ch=H-PAD.t-PAD.b;
-  const yMin=40, yMax=305;
+  const yMin=40, yMax=500;
   const xOf = i => PAD.l+(i/(N-1))*cw;
   const yOf = v => PAD.t+(1-(v-yMin)/(yMax-yMin))*ch;
-  const mkPath = arr => {
-    if (step<1) return '';
-    return 'M '+arr.slice(0,step+1).map((v,i)=>`${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(' L ');
-  };
+  const mkPath = (arr,n) => n<1 ? '' : 'M '+arr.slice(0,n+1).map((v,i)=>`${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(' L ');
 
-  // Month tick positions (1st of each month)
-  const monthTicks = [];
-  const startD = new Date(2022,2,1);
-  for (let i=0; i<N; i++) {
-    const d = new Date(startD); d.setDate(startD.getDate()+i);
-    if (d.getDate()===1) {
-      const mo=['Jan','Feb','Mär','Apr','Mai','Jun','Jul','Aug','Sep','Okt','Nov','Dez'][d.getMonth()];
-      monthTicks.push({ i, label: mo + (d.getFullYear()===2023?' \'23':' \'22') });
-    }
-  }
-
-  const EVENTS = [{e:E1,c:'#D97706'},{e:E2,c:'#DC2626'},{e:E3,c:'#2563EB'},{e:E4,c:'#16A34A'}];
+  const monthTicks = [
+    {i:0,   label:"Mär '22"}, {i:61,  label:"Jun '22"},
+    {i:127, label:"Sep '22"}, {i:189, label:"Dez '22"}, {i:232, label:"Feb '23"},
+  ];
+  const allEvts = [
+    {e:F1,c:'#16A34A'},{e:F2,c:'#16A34A'},{e:F3,c:'#16A34A'},
+    {e:NS,c:'#DC2626'},{e:F4,c:'#16A34A'},{e:F5,c:'#2563EB'},
+  ];
 
   return (
     <div>
@@ -682,32 +708,26 @@ const CrisisChart = () => {
         {/* Chart */}
         <div className="flex-1">
           <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{display:'block',overflow:'visible'}}>
-            {[50,100,150,200,250,300].map(v=>(
+            {[50,100,150,200,250,300,350,400,450].map(v=>(
               <g key={v}>
                 <line x1={PAD.l} y1={yOf(v)} x2={W-PAD.r} y2={yOf(v)} stroke="#E5E7EB" strokeWidth="1" strokeDasharray="4 3"/>
-                <text x={PAD.l-6} y={yOf(v)+4} fontSize="10" fill="#9CA3AF" textAnchor="end">{v}</text>
+                <text x={PAD.l-5} y={yOf(v)+4} fontSize="10" fill="#9CA3AF" textAnchor="end">{v}</text>
               </g>
             ))}
             {monthTicks.map(({i,label})=>(
               <text key={i} x={xOf(i)} y={H-4} fontSize="9" fill="#6B7280" textAnchor="middle">{label}</text>
             ))}
-            {/* Green & orange always visible in full — reference lines */}
-            {(() => {
-              const fp = arr => 'M '+arr.map((v,i)=>`${xOf(i).toFixed(1)},${yOf(v).toFixed(1)}`).join(' L ');
-              return <>
-                <path d={fp(green)}  stroke="#16A34A" strokeWidth="2"   fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-                <path d={fp(orange)} stroke="#D97706" strokeWidth="2"   fill="none" strokeLinecap="round" strokeLinejoin="round"/>
-              </>;
-            })()}
-            {/* Blue market line — animated */}
-            {step>0 && <path d={mkPath(blue)} stroke="#2563EB" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>}
-            {EVENTS.map(({e,c})=> step>=e && (
+            {/* All three lines animated together */}
+            {step>0 && <path d={mkPath(orange,step)} stroke="#D97706" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>}
+            {step>0 && <path d={mkPath(green, step)} stroke="#16A34A" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round"/>}
+            {step>0 && <path d={mkPath(blue,  step)} stroke="#2563EB" strokeWidth="2.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>}
+            {allEvts.map(({e,c})=> step>=e && (
               <line key={e} x1={xOf(e)} y1={PAD.t} x2={xOf(e)} y2={H-PAD.b} stroke={c} strokeWidth="1.5" strokeDasharray="3 2" opacity="0.7"/>
             ))}
             {step>0 && <circle cx={xOf(step)} cy={yOf(blue[step])} r="4" fill="#2563EB" stroke="white" strokeWidth="2"/>}
           </svg>
           <div className="flex gap-5 mt-1 text-xs" style={{color:C.dgray}}>
-            {[{c:'#2563EB',l:'Terminmarktpreis'},{c:'#D97706',l:'Stop-Loss'},{c:'#16A34A',l:'Take-Profit (ecoplanet)'}].map(({c,l})=>(
+            {[{c:'#2563EB',l:'Terminmarktpreis'},{c:'#D97706',l:'Stop-Loss'},{c:'#16A34A',l:'Take-Profit'}].map(({c,l})=>(
               <span key={l} className="flex items-center gap-1.5">
                 <span style={{width:18,height:3,background:c,display:'inline-block',borderRadius:2}}/>
                 {l}
@@ -717,53 +737,75 @@ const CrisisChart = () => {
           </div>
         </div>
         {/* Notifications */}
-        <div className="flex flex-col gap-3" style={{width:260,minWidth:260}}>
-          <div className="text-xs font-semibold mb-1" style={{color:C.dgray}}>Handelssignale</div>
+        <div className="flex flex-col gap-1.5" style={{width:248,minWidth:248}}>
+          <div className="text-xs font-semibold mb-0.5" style={{color:C.dgray}}>Handelssignale</div>
           {notifications.length===0 && (
             <div className="rounded-lg p-3 text-xs" style={{background:'#F9FAFB',color:'#9CA3AF',border:'1px dashed #E5E7EB'}}>
               Signale erscheinen während der Animation…
             </div>
           )}
           {notifications.map(n=>(
-            <div key={n.id} className="slide-in-right rounded-xl p-4 text-xs"
+            <div key={n.id} className="slide-in-right rounded-xl p-2 text-xs"
               style={{background:n.bg,border:`1.5px solid ${n.border}`}}>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="font-bold text-sm" style={{color:n.color}}>{n.icon}</span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold" style={{color:n.color}}>{n.icon}</span>
                 <span className="font-bold" style={{color:n.color}}>{n.title}</span>
               </div>
-              <div className="font-medium leading-snug mb-1" style={{color:'#1F2937'}}>{n.msg}</div>
+              <div className="leading-snug" style={{color:'#1F2937'}}>{n.msg}</div>
               <div style={{color:'#6B7280'}}>{n.date}</div>
             </div>
           ))}
         </div>
       </div>
       {/* Controls */}
-      <div className="flex items-center gap-4 mt-4">
+      <div className="flex items-center gap-4 mt-3">
         {step<N-1 && !playing && (
           <button onClick={()=>setPlaying(true)}
             className="px-5 py-2 rounded-lg text-sm font-semibold text-white"
-            style={{background:C.darkblue}}>
-            ▶ Abspielen
-          </button>
+            style={{background:C.darkblue}}>▶ Abspielen</button>
         )}
         {playing && (
           <button onClick={()=>setPlaying(false)}
             className="px-5 py-2 rounded-lg text-sm font-semibold"
-            style={{background:'#F3F4F6',color:C.darkblue}}>
-            ⏸ Pause
-          </button>
+            style={{background:'#F3F4F6',color:C.darkblue}}>⏸ Pause</button>
         )}
         {step>0 && (
           <button onClick={replay}
             className="px-5 py-2 rounded-lg text-sm font-semibold"
-            style={{background:'#F3F4F6',color:C.darkblue}}>
-            ↺ Wiederholen
-          </button>
+            style={{background:'#F3F4F6',color:C.darkblue}}>↺ Wiederholen</button>
         )}
         <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{background:'#E5E7EB'}}>
           <div className="h-full rounded-full transition-all" style={{width:`${(step/(N-1))*100}%`,background:C.darkblue}}/>
         </div>
         <span className="text-xs" style={{color:C.dgray}}>{labels[step]||labels[0]}</span>
+      </div>
+      {/* Live KPI boxes */}
+      <div className="flex gap-3 mt-3">
+        <div className="flex-1 rounded-xl p-3" style={{background:'#EFF6FF',border:'1.5px solid #BFDBFE'}}>
+          <div className="text-xs mb-1" style={{color:'#1D4ED8'}}>Ø Marktpreis (laufend)</div>
+          <div className="text-xl font-bold" style={{color:'#1E40AF'}}>
+            {step>0 ? `${avgMarket.toFixed(2).replace('.',',')} €/MWh` : '—'}
+          </div>
+          <div className="text-xs mt-0.5" style={{color:'#6B7280'}}>{step>0 ? `${step+1} Handelstage` : 'Animation starten'}</div>
+        </div>
+        <div className="flex-1 rounded-xl p-3" style={{background:avgFix!=null?'#F0FDF4':'#F9FAFB',border:`1.5px solid ${avgFix!=null?'#86EFAC':'#E5E7EB'}`}}>
+          <div className="text-xs mb-1" style={{color:avgFix!=null?'#166534':'#9CA3AF'}}>Ø Fixierungspreis</div>
+          <div className="text-xl font-bold" style={{color:avgFix!=null?'#15803D':'#D1D5DB'}}>
+            {avgFix!=null ? `${avgFix.toFixed(2).replace('.',',')} €/MWh` : '—'}
+          </div>
+          <div className="text-xs mt-0.5" style={{color:'#6B7280'}}>
+            {fixPrices.length===0 ? 'Keine Fixierung bisher' : `${fixPrices.length} von 5 Fixierungen`}
+          </div>
+        </div>
+        {done && savingsPct!=null && (
+          <div className="flex-1 rounded-xl p-3 slide-in-right" style={{background:'#FFFBEB',border:'1.5px solid #FCD34D'}}>
+            <div className="text-xs mb-1" style={{color:'#92400E'}}>Einsparung durch Fixierungen</div>
+            <div className="text-xl font-bold" style={{color:savingsPct>=0?'#15803D':'#DC2626'}}>
+              {savingsPct>=0?'+':''}{savingsPct.toFixed(1).replace('.',',')} %
+            </div>
+            <div className="text-xs mt-0.5" style={{color:'#6B7280'}}>vs. Ø Marktpreis</div>
+          </div>
+        )}
       </div>
     </div>
   );
