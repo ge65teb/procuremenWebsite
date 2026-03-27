@@ -522,7 +522,7 @@ const SCENARIOS = {
 ═══════════════════════════════════════════ */
 const CRISIS_DATA = (() => {
   // 248 trading days: 2022-03-04 → 2023-02-22
-  // UA=0   (24.02.2022): Überfall Russlands auf die Ukraine (vor Datenbeginn → Index 0)
+  // UA=104 (01.08.2022): EU-Beschluss kein russisches Gas mehr zu beziehen
   // F1=13  (23.03.2022): Erste Fixierung Stop-Loss  @ 122,00 €/MWh
   // F2=61  (01.06.2022): Zweite Fixierung Stop-Loss @ 188,39 €/MWh
   // F3=109 (08.08.2022): Dritte Fixierung Stop-Loss @ 234,50 €/MWh
@@ -638,7 +638,7 @@ const CRISIS_DATA = (() => {
     170.64,173.78,174.80,177.25,179.49,178.11,177.06,175.81,
   ];
   const N = 248;
-  const UA=0, F1=13, F2=61, F3=109, F4=188, F5=237;
+  const UA=104, F1=13, F2=61, F3=109, F4=188, F5=237;
   return { labels, blue, orange, green, N, UA, F1, F2, F3, F4, F5 };
 })();
 
@@ -651,14 +651,16 @@ const CrisisChart = () => {
   useEffect(() => {
     if (!playing) return;
     if (step >= N-1) { setPlaying(false); return; }
-    const t = setTimeout(() => setStep(s=>s+1), 50);
+    // Slow down around the EU gas decision (UA) and through the following fixierung (F3)
+    const slow = step >= UA-4 && step <= F3+3;
+    const t = setTimeout(() => setStep(s=>s+1), slow ? 180 : 50);
     return () => clearTimeout(t);
   }, [playing, step]);
 
   useEffect(() => {
     const EVTS = [
       { id:0, at:UA, color:'#991B1B', bg:'#FEE2E2', border:'#FCA5A5', icon:'⚡',
-        title:'Geopolitisches Ereignis', msg:'Überfall Russlands auf die Ukraine', date:"24. Feb '22" },
+        title:'Geopolitisches Ereignis', msg:'EU beschließt: kein russisches Gas mehr beziehen' },
       { id:1, at:F1, color:'#166534', bg:'#DCFCE7', border:'#86EFAC', icon:'✓',
         title:'Erste Fixierung', msg:`Stop-Loss — Fixierungspreis: ${blue[F1].toFixed(2).replace('.',',')} €/MWh` },
       { id:2, at:F2, color:'#166534', bg:'#DCFCE7', border:'#86EFAC', icon:'✓',
@@ -698,8 +700,8 @@ const CrisisChart = () => {
     {i:127, label:"Sep '22"}, {i:189, label:"Dez '22"}, {i:232, label:"Feb '23"},
   ];
   const allEvts = [
-    {e:F1,c:'#16A34A'},{e:F2,c:'#16A34A'},{e:F3,c:'#16A34A'},
-    {e:F4,c:'#16A34A'},{e:F5,c:'#D97706'},
+    {e:F1,c:'#16A34A'},{e:F2,c:'#16A34A'},{e:UA,c:'#DC2626'},
+    {e:F3,c:'#16A34A'},{e:F4,c:'#16A34A'},{e:F5,c:'#D97706'},
   ];
 
   return (
@@ -887,7 +889,9 @@ const CurrentMarketChart = () => {
   useEffect(() => {
     if (!playing) return;
     if (step >= N - 1) { setPlaying(false); return; }
-    const t = setTimeout(() => setStep(s => s + 1), 80);
+    // Slow down around the Irankrieg outbreak (EVENT3) and through the Stop-Loss fixierung (EVENT4)
+    const slow = step >= EVENT3 - 4 && step <= EVENT4 + 3;
+    const t = setTimeout(() => setStep(s => s + 1), slow ? 180 : 80);
     return () => clearTimeout(t);
   }, [playing, step]);
 
