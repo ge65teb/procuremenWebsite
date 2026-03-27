@@ -651,9 +651,7 @@ const CrisisChart = () => {
   useEffect(() => {
     if (!playing) return;
     if (step >= N-1) { setPlaying(false); return; }
-    // Slow down around the EU gas decision (UA) and through the following fixierung (F3)
-    const slow = step >= UA-4 && step <= F3+3;
-    const t = setTimeout(() => setStep(s=>s+1), slow ? 180 : 50);
+    const t = setTimeout(() => setStep(s=>s+1), 70);
     return () => clearTimeout(t);
   }, [playing, step]);
 
@@ -889,9 +887,7 @@ const CurrentMarketChart = () => {
   useEffect(() => {
     if (!playing) return;
     if (step >= N - 1) { setPlaying(false); return; }
-    // Slow down around the Irankrieg outbreak (EVENT3) and through the Stop-Loss fixierung (EVENT4)
-    const slow = step >= EVENT3 - 4 && step <= EVENT4 + 3;
-    const t = setTimeout(() => setStep(s => s + 1), slow ? 180 : 80);
+    const t = setTimeout(() => setStep(s => s + 1), 110);
     return () => clearTimeout(t);
   }, [playing, step]);
 
