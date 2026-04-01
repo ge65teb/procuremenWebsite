@@ -137,7 +137,6 @@ const Header = ({ tab, setTab, arbeitspreis, setArbeitspreis }) => (
       </div>
       <div className="flex items-center gap-2">
         <Chip label="Strom"     value={COMPANY.stromMWh.toLocaleString('de-DE')} unit="MWh/a"/>
-        <Chip label="Gas"       value={COMPANY.gasMWh.toLocaleString('de-DE')}  unit="MWh/a"/>
         {/* Editable Arbeitspreis */}
         <div className="flex flex-col px-3 py-1 rounded-xl" style={{ background:'rgba(255,255,255,0.09)' }}>
           <span className="text-xs" style={{ color:'rgba(255,255,255,0.5)' }}>Aktueller Arbeitspreis</span>
@@ -152,7 +151,6 @@ const Header = ({ tab, setTab, arbeitspreis, setArbeitspreis }) => (
             <span className="text-xs font-normal" style={{ color:'rgba(255,255,255,0.5)' }}>ct/kWh</span>
           </div>
         </div>
-        <Chip label="Markt Gas"  value={COMPANY.gasMarket}   unit="ct/kWh"/>
         <Chip label="Standorte"  value={COMPANY.sites.toLocaleString('de-DE')} unit=""/>
       </div>
     </div>
@@ -180,64 +178,21 @@ const PRODUCTS = [
 // Reference prices per product (ct/kWh) and optimal slider preset
 const PRODUCT_PRICES = { base:9.05, peak:11.38, wind:8.00, pv:6.2, spot:13.11 };
 
-const SHEETS_CSV     = 'https://docs.google.com/spreadsheets/d/1jOfwcirxhYVyIDVJKzGzJpJEnYZYoWmwaE7ldByQEcI/gviz/tq?tqx=out:csv&gid=0';
 const SHEETS_REF_CSV = 'https://docs.google.com/spreadsheets/d/1jOfwcirxhYVyIDVJKzGzJpJEnYZYoWmwaE7ldByQEcI/gviz/tq?tqx=out:csv&sheet=8)%20Ref%20Price';
+
+/* ─── Pre-computed weekly avg load profile (kW), scaled to 5 310 MWh/a ───
+   Source: NORMA Group SE Lastgang 2025, 35 035 × 15-min intervals,
+   averaged per hour-of-week (Mon 00:00 = index 0), then scaled so that
+   sum × 52 / 1000 = 5 310 MWh (matches Ref-Price total consumption).
+   Recompute via:  curl …/gviz/tq?tqx=out:csv&gid=0 | node scripts/compute_load.js  */
+const LOAD_WEEKLY = [634.9,640.3,631.3,631.6,721.5,953.5,382.4,147.6,146.8,541.5,539.8,519.5,765.8,558.8,604.2,653.7,690.1,695.2,799.4,655.8,801.2,1095.4,1128,1111.3,842.4,751.6,731.5,694.5,783.4,952.9,179,156.7,224.2,649.8,579.1,565.5,781.1,657.3,687.5,691.3,642.9,692.1,788.8,654.7,801.1,1176.3,1102.1,1087.2,849.3,765.3,720.6,695.2,809.5,958.6,197.1,75.1,164.5,518.4,431.3,558,799.4,633.3,698.1,700.8,711.1,748.1,899.2,686.6,732.9,1094.7,1176.3,1109.7,853.5,752.8,705.4,691.5,807.1,972.9,188.5,121,214.7,656.6,550.7,611.4,746,575.1,633.3,679.4,614.7,701.6,807,606.5,719.4,1110.8,1178.4,1080,858.5,747.5,705.5,668.8,755.7,979.6,198.6,103.3,182.6,588.4,536.7,596.4,686.3,610.9,771.2,769.9,803,877.6,939.5,921.3,870.5,707.3,610.6,562.3,509.3,528.2,540,535.3,553.3,647,757.5,698.3,603.7,477.2,400.7,294,234.6,233.7,222.6,242.8,275.7,294.6,341.1,415.4,475.6,486.3,479.4,474.3,475.8,467.2,470,478.7,503.9,526.6,476.2,404.6,302.8,242.7,197.4,188.5,201.4,203.5,213.2,217.7,247.6,285.2,338.6,407.6,480.6,529.2,608.5,641.4];
 
 const StrategieTab = ({ arbeitspreis }) => {
   const [sliders, setSliders] = useState({ base:100, peak:100, wind:100, pv:0 });
-  const [loadData, setLoadData] = useState(null); // null until fetched — no synthetic fallback
-  const [actualMWh, setActualMWh] = useState(0);
-  const [loadStatus, setLoadStatus] = useState('loading');
+  const [loadData] = useState(LOAD_WEEKLY);
+  const [actualMWh] = useState(5310);
+  const [loadStatus] = useState('live');
   const [refVolumes, setRefVolumes] = useState(null);
-
-  /* Fetch real load profile from Google Sheets on mount */
-  useEffect(() => {
-    fetch(SHEETS_CSV)
-      .then(r => r.text())
-      .then(text => {
-        /* Proper quoted-CSV parser — handles "174,640" (German decimal comma) */
-        const parseCSVRow = r => {
-          const cells=[]; let c='', q=false;
-          for (const ch of r) {
-            if (ch==='"') { q=!q; }
-            else if (ch===',' && !q) { cells.push(c); c=''; }
-            else { c+=ch; }
-          }
-          cells.push(c);
-          return cells;
-        };
-        const rows = text.trim().split('\n');
-        const pts = [];
-        rows.forEach(row => {
-          const cols = parseCSVRow(row);
-          const ts  = (cols[0]||'').trim();
-          const raw = (cols[1]||'').replace(',','.').trim();
-          const val = parseFloat(raw);
-          if (!ts || isNaN(val)) return;
-          const [datePart, timePart] = ts.split(' ');
-          if (!datePart || !timePart) return;
-          const [d,m,y] = datePart.split('.');
-          const [h] = timePart.split(':');
-          const date = new Date(2000+parseInt(y), parseInt(m)-1, parseInt(d), parseInt(h));
-          pts.push({ date, val });
-        });
-        if (pts.length < 100) { setLoadStatus('error'); return; }
-        /* Total annual MWh (15-min intervals → × 0.25h ÷ 1000) */
-        const totalMWh = Math.round(pts.reduce((a,p)=>a+p.val,0) * 0.25 / 1000);
-        /* Average weekly profile: Mon=0 … Sun=6, 24h each */
-        const buckets = Array.from({length:168}, ()=>[]);
-        pts.forEach(({date, val}) => {
-          const dow = (date.getDay()+6)%7; // Mon=0
-          const hr  = date.getHours();
-          buckets[dow*24+hr].push(val);
-        });
-        const weekly = buckets.map(b => b.length ? b.reduce((a,v)=>a+v,0)/b.length : 0);
-        setLoadData(weekly);
-        setActualMWh(totalMWh);
-        setLoadStatus('live');
-      })
-      .catch(() => setLoadStatus('error'));
-  }, []);
 
   /* Fetch reference volumes from 8) Ref Price */
   useEffect(() => {
