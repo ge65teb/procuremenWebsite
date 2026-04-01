@@ -39,9 +39,9 @@ const C = {
 
 const COMPANY = {
   name: 'NORMA Group SE',
-  stromMWh: 12547, gasMWh: 7000,
+  stromMWh: 5310, gasMWh: 7000,
   stromMarket: 10.23, gasMarket: 3.50,
-  sites: 2500,
+  sites: 2,
 };
 
 /* ─── seeded RNG for stable data ─── */
@@ -88,25 +88,24 @@ const PEAK_MAX = 760;
 const WIND_MAX = 400;
 const PV_MAX   = 330;
 
-/* ─── normalised product shape profiles (0–1 per hour) ─── */
+/* ─── normalised product shape profiles (0–1 per hour, index-based only) ─── */
 const PROFILES = (() => {
   const rw = makeRng(7);
-  const base = LOAD.map(() => 1);
-  const peak = LOAD.map((_, i) => {
+  const base = Array.from({length:168}, () => 1);
+  const peak = Array.from({length:168}, (_, i) => {
     const d = Math.floor(i / 24), h = i % 24;
     return d < 5 && h >= 7 && h < 17 ? 1 : 0;
   });
-  const wind = LOAD.map((_, i) => {
-    const t = i;
+  const wind = Array.from({length:168}, (_, i) => {
     const raw = 0.5
-      + 0.22 * Math.sin(t * 0.18)
-      + 0.18 * Math.cos(t * 0.31)
-      + 0.12 * Math.sin(t * 0.07)
-      + 0.08 * Math.cos(t * 0.55)
+      + 0.22 * Math.sin(i * 0.18)
+      + 0.18 * Math.cos(i * 0.31)
+      + 0.12 * Math.sin(i * 0.07)
+      + 0.08 * Math.cos(i * 0.55)
       + (rw() - 0.5) * 0.15;
     return Math.max(0.05, Math.min(1, raw));
   });
-  const pv = LOAD.map((_, i) => {
+  const pv = Array.from({length:168}, (_, i) => {
     const h = i % 24;
     if (h < 5 || h > 20) return 0;
     const angle = (h - 5) / 15;
@@ -179,31 +178,175 @@ const PRODUCTS = [
   { key:'pv',    label:'PV-PPA',   color:'#16A34A',  fillColor:'#16A34A', desc:'Tägliches Sonnenstrahlungsprofil', max:PV_MAX   },
 ];
 // Reference prices per product (ct/kWh) and optimal slider preset
-const PRODUCT_PRICES = { base:8.38, peak:8.60, wind:7.64, pv:6.54, spot:9.80 };
-const OPTIMAL_SLIDERS = { base:65, peak:72, wind:55, pv:45 };
+const PRODUCT_PRICES = { base:9.05, peak:11.38, wind:8.00, pv:6.2, spot:13.11 };
+
+const SHEETS_CSV     = 'https://docs.google.com/spreadsheets/d/1jOfwcirxhYVyIDVJKzGzJpJEnYZYoWmwaE7ldByQEcI/gviz/tq?tqx=out:csv&gid=0';
+const SHEETS_REF_CSV = 'https://docs.google.com/spreadsheets/d/1jOfwcirxhYVyIDVJKzGzJpJEnYZYoWmwaE7ldByQEcI/gviz/tq?tqx=out:csv&sheet=8)%20Ref%20Price';
 
 const StrategieTab = ({ arbeitspreis }) => {
-  const [sliders, setSliders] = useState({ base:60, peak:65, wind:40, pv:30 });
+  const [sliders, setSliders] = useState({ base:100, peak:100, wind:100, pv:0 });
+  const [loadData, setLoadData] = useState(null); // null until fetched — no synthetic fallback
+  const [actualMWh, setActualMWh] = useState(0);
+  const [loadStatus, setLoadStatus] = useState('loading');
+  const [refVolumes, setRefVolumes] = useState(null);
+
+  /* Fetch real load profile from Google Sheets on mount */
+  useEffect(() => {
+    fetch(SHEETS_CSV)
+      .then(r => r.text())
+      .then(text => {
+        /* Proper quoted-CSV parser — handles "174,640" (German decimal comma) */
+        const parseCSVRow = r => {
+          const cells=[]; let c='', q=false;
+          for (const ch of r) {
+            if (ch==='"') { q=!q; }
+            else if (ch===',' && !q) { cells.push(c); c=''; }
+            else { c+=ch; }
+          }
+          cells.push(c);
+          return cells;
+        };
+        const rows = text.trim().split('\n');
+        const pts = [];
+        rows.forEach(row => {
+          const cols = parseCSVRow(row);
+          const ts  = (cols[0]||'').trim();
+          const raw = (cols[1]||'').replace(',','.').trim();
+          const val = parseFloat(raw);
+          if (!ts || isNaN(val)) return;
+          const [datePart, timePart] = ts.split(' ');
+          if (!datePart || !timePart) return;
+          const [d,m,y] = datePart.split('.');
+          const [h] = timePart.split(':');
+          const date = new Date(2000+parseInt(y), parseInt(m)-1, parseInt(d), parseInt(h));
+          pts.push({ date, val });
+        });
+        if (pts.length < 100) { setLoadStatus('error'); return; }
+        /* Total annual MWh (15-min intervals → × 0.25h ÷ 1000) */
+        const totalMWh = Math.round(pts.reduce((a,p)=>a+p.val,0) * 0.25 / 1000);
+        /* Average weekly profile: Mon=0 … Sun=6, 24h each */
+        const buckets = Array.from({length:168}, ()=>[]);
+        pts.forEach(({date, val}) => {
+          const dow = (date.getDay()+6)%7; // Mon=0
+          const hr  = date.getHours();
+          buckets[dow*24+hr].push(val);
+        });
+        const weekly = buckets.map(b => b.length ? b.reduce((a,v)=>a+v,0)/b.length : 0);
+        setLoadData(weekly);
+        setActualMWh(totalMWh);
+        setLoadStatus('live');
+      })
+      .catch(() => setLoadStatus('error'));
+  }, []);
+
+  /* Fetch reference volumes from 8) Ref Price */
+  useEffect(() => {
+    const parseDE = s => {
+      const c = (s||'').replace(/[^\d.,]/g,'');
+      if (!c) return 0;
+      if (c.includes(',')) return parseFloat(c.replace(/\./g,'').replace(',','.')) || 0;
+      const parts = c.split('.');
+      if (parts.length > 1 && parts[parts.length-1].length === 3) return parseFloat(c.replace(/\./g,'')) || 0;
+      return parseFloat(c) || 0;
+    };
+    const parseRow = row => {
+      const cells=[]; let cur='', inQ=false;
+      for (const ch of row) {
+        if (ch==='"') { inQ=!inQ; }
+        else if (ch===',' && !inQ) { cells.push(cur.trim()); cur=''; }
+        else { cur+=ch; }
+      }
+      cells.push(cur.trim());
+      return cells;
+    };
+    fetch(SHEETS_REF_CSV)
+      .then(r => r.text())
+      .then(text => {
+        const rows = text.trim().split('\n').map(parseRow);
+        const quarters = ['Q1','Q2','Q3','Q4','Y'];
+        let baseMWh=0, peakMWh=0, windMWh=0, pvMWh=0, spotMWh=0;
+        let baseCost=0, peakCost=0;
+        let windPrice=PRODUCT_PRICES.wind, pvPrice=PRODUCT_PRICES.pv, spotPrice=PRODUCT_PRICES.spot;
+        rows.forEach(c => {
+          if (quarters.includes(c[1])) {
+            const bMWh=parseDE(c[4]), bPrice=parseDE(c[3]);
+            const pMWh=parseDE(c[7]), pPrice=parseDE(c[6]);
+            baseMWh+=bMWh; baseCost+=bMWh*bPrice;
+            peakMWh+=pMWh; peakCost+=pMWh*pPrice;
+          }
+          const label = (c[9]||'').trim();
+          // Actual labels after parseRow trim: "Wind" (2110 MWh), "Solar" (0 MWh), "- Spot" (1572 MWh)
+          if (label === 'Wind')    { windMWh  = parseDE(c[11]); }
+          if (label === 'Solar')   { pvMWh    = parseDE(c[11]); }
+          if (label === '- Spot')  { spotMWh  = parseDE(c[11]); }
+          // Wind & spot prices not in this block; windPrice/spotPrice use PRODUCT_PRICES defaults
+        });
+        if (baseMWh+peakMWh+windMWh > 0)
+          setRefVolumes({
+            baseMWh, peakMWh, windMWh, pvMWh, spotMWh,
+            basePrice: baseMWh > 0 ? baseCost/baseMWh/10 : PRODUCT_PRICES.base,
+            peakPrice: peakMWh > 0 ? peakCost/peakMWh/10 : PRODUCT_PRICES.peak,
+            windPrice, pvPrice, spotPrice,
+          });
+      })
+      .catch(() => {});
+  }, []);
+
+  /* Product capacities: 100% slider = reference MWh when refVolumes is loaded */
+  const productMaxes = useMemo(() => {
+    if (!refVolumes) return { base:BASE_MAX, peak:PEAK_MAX, wind:WIND_MAX, pv:PV_MAX };
+    const profSum = prof => prof.reduce((a,b)=>a+b, 0);
+    const toMax = (mwh, prof) => Math.max(1, Math.round(mwh * 1000 / (profSum(prof) * 52)));
+    return {
+      base: toMax(refVolumes.baseMWh, PROFILES.base),
+      peak: toMax(refVolumes.peakMWh, PROFILES.peak),
+      wind: toMax(refVolumes.windMWh, PROFILES.wind),
+      pv:   refVolumes.pvMWh > 0 ? toMax(refVolumes.pvMWh, PROFILES.pv) : PV_MAX,
+    };
+  }, [refVolumes]);
+
+  /* Auto-apply reference portfolio sliders when ref data arrives */
+  useEffect(() => {
+    if (refVolumes) setSliders({ base:100, peak:100, wind:100, pv:0 });
+  }, [refVolumes]);
+
+  /* Dynamic product prices from sheet; falls back to constants if not yet loaded */
+  const productPrices = useMemo(() => {
+    if (!refVolumes) return PRODUCT_PRICES;
+    return {
+      base: refVolumes.basePrice,
+      peak: refVolumes.peakPrice,
+      wind: refVolumes.windPrice,
+      pv:   refVolumes.pvPrice > 0 ? refVolumes.pvPrice : PRODUCT_PRICES.pv,
+      spot: refVolumes.spotPrice,
+    };
+  }, [refVolumes]);
 
   /* SVG layout constants */
   const W=900, H=280, PL=46, PB=32, PT=14, PR=10;
   const CW = W-PL-PR, CH = H-PT-PB;
-  const YMAX = 1450;
-  const xp = i  => PL + (i / (LOAD.length - 1)) * CW;
+  const YMAX = useMemo(() => loadData ? Math.ceil(Math.max(...loadData)*1.15/100)*100 : 1400, [loadData]);
+  const xp = i  => PL + (i / 167) * CW;
   const yp = v  => PT + CH - (v / YMAX) * CH;
   const yBottom = PT + CH;
 
-  /* Compute stacks */
+  /* Compute stacks — index 6 = raw uncapped total for Überdeckung */
   const stacks = useMemo(() => {
+    if (!loadData) return [];
     const sf = { base:sliders.base/100, peak:sliders.peak/100, wind:sliders.wind/100, pv:sliders.pv/100 };
-    return LOAD.map((load, i) => {
-      const s1 = Math.min(sf.base * BASE_MAX * PROFILES.base[i], load);
-      const s2 = Math.min(s1 + sf.peak * PEAK_MAX * PROFILES.peak[i], load);
-      const s3 = Math.min(s2 + sf.wind * WIND_MAX * PROFILES.wind[i], load);
-      const s4 = Math.min(s3 + sf.pv * PV_MAX * PROFILES.pv[i], load);
-      return [0, s1, s2, s3, s4, load];
+    const pm = productMaxes;
+    return loadData.map((load, i) => {
+      const r1 = sf.base * pm.base * PROFILES.base[i];
+      const r2 = r1 + sf.peak * pm.peak * PROFILES.peak[i];
+      const r3 = r2 + sf.wind * pm.wind * PROFILES.wind[i];
+      const r4 = r3 + sf.pv * pm.pv * PROFILES.pv[i];
+      const s1 = Math.min(r1, load);
+      const s2 = Math.min(r2, load);
+      const s3 = Math.min(r3, load);
+      const s4 = Math.min(r4, load);
+      return [0, s1, s2, s3, s4, load, r4];
     });
-  }, [sliders]);
+  }, [sliders, loadData, productMaxes]);
 
   /* Build SVG area path between two value arrays */
   const areaPath = (top, bot) => {
@@ -214,47 +357,126 @@ const StrategieTab = ({ arbeitspreis }) => {
   };
 
   /* Load curve polyline */
-  const loadLine = LOAD.map((v,i) => `${i===0?'M':'L'}${xp(i).toFixed(1)},${yp(v).toFixed(1)}`).join(' ');
+  const loadLine = loadData ? loadData.map((v,i) => `${i===0?'M':'L'}${xp(i).toFixed(1)},${yp(v).toFixed(1)}`).join(' ') : '';
 
   /* Day markers */
   const DAY_LABELS = ['Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag','Sonntag'];
   const dayX = d => xp(d * 24);
   const dayMidX = d => xp(d * 24 + 12);
 
-  /* Y gridlines */
-  const Y_GRID = [0, 350, 700, 1050, 1400];
+  /* Y gridlines — dynamic based on YMAX */
+  const Y_GRID = useMemo(() => [0, Math.round(YMAX*0.25/50)*50, Math.round(YMAX*0.5/50)*50, Math.round(YMAX*0.75/50)*50, YMAX], [YMAX]);
 
   /* Coverage stats */
   const coverage = useMemo(() => {
-    const totLoad = LOAD.reduce((a,b) => a+b, 0);
+    const empty = { perProduct:['0','0','0','0'], ueberdeckung:'0' };
+    if (!loadData) return empty;
+    const pm = productMaxes;
+    const totLoad = loadData.reduce((a,b) => a+b, 0);
     const sf = { base:sliders.base/100, peak:sliders.peak/100, wind:sliders.wind/100, pv:sliders.pv/100 };
     const keys = ['base','peak','wind','pv'];
     const profs = [PROFILES.base, PROFILES.peak, PROFILES.wind, PROFILES.pv];
-    const maxes = [BASE_MAX, PEAK_MAX, WIND_MAX, PV_MAX];
-    return keys.map((k,idx) => {
-      const total = LOAD.reduce((acc, load, i) => acc + Math.min(sf[k] * maxes[idx] * profs[idx][i], load), 0);
+    const maxes = [pm.base, pm.peak, pm.wind, pm.pv];
+    const perProduct = keys.map((k,idx) => {
+      const total = loadData.reduce((acc, load, i) => acc + Math.min(sf[k] * maxes[idx] * profs[idx][i], load), 0);
       return (total / totLoad * 100).toFixed(1);
     });
-  }, [sliders]);
+    const ueberdeckung = (loadData.reduce((acc, load, i) => {
+      const raw = sf.base*pm.base*PROFILES.base[i] + sf.peak*pm.peak*PROFILES.peak[i]
+                + sf.wind*pm.wind*PROFILES.wind[i] + sf.pv*pm.pv*PROFILES.pv[i];
+      return acc + Math.max(0, raw - load);
+    }, 0) / totLoad * 100).toFixed(1);
+    return { perProduct, ueberdeckung };
+  }, [sliders, loadData, productMaxes]);
+
+  /* Net stacked contribution per product (for bar chart) */
+  const stackedCoverage = useMemo(() => {
+    if (!loadData || stacks.length === 0) return { base:0, peak:0, wind:0, pv:0, unhedged:0, ueb:0 };
+    const totLoad = loadData.reduce((a,b)=>a+b, 0);
+    const nets = [0,1,2,3].map(idx => stacks.reduce((a,s)=>a+(s[idx+1]-s[idx]), 0) / totLoad * 100);
+    const unhedged = stacks.reduce((a,s)=>a+(s[5]-s[4]), 0) / totLoad * 100;
+    const ueb = stacks.reduce((a,s)=>a+Math.max(0,s[6]-s[5]), 0) / totLoad * 100;
+    return { base:nets[0], peak:nets[1], wind:nets[2], pv:nets[3], unhedged, ueb };
+  }, [stacks, loadData]);
+
+  /* Dynamic spot price: increases with PPA usage (merit-order effect) */
+  const dynamicSpotPrice = useMemo(() => {
+    if (!loadData) return productPrices.spot;
+    const pm = productMaxes;
+    const totLoad = loadData.reduce((a,b)=>a+b, 0);
+    const sf = { wind:sliders.wind/100, pv:sliders.pv/100 };
+    const windCov = loadData.reduce((acc,load,i)=>acc+Math.min(sf.wind*pm.wind*PROFILES.wind[i],load), 0) / totLoad;
+    const pvCov   = loadData.reduce((acc,load,i)=>acc+Math.min(sf.pv*pm.pv*PROFILES.pv[i],load), 0) / totLoad;
+    return productPrices.spot * (1 + 0.18 * (windCov + pvCov));
+  }, [sliders, loadData, productMaxes, productPrices]);
 
   /* Blended portfolio price from stacked non-overlapping layers */
   const blendedPrice = useMemo(() => {
-    const totLoad = LOAD.reduce((a,b) => a+b, 0);
+    if (!loadData || stacks.length === 0) return 0;
+    const totLoad = loadData.reduce((a,b) => a+b, 0);
     const pcts = [0,1,2,3].map(idx =>
       stacks.reduce((acc, s) => acc + (s[idx+1] - s[idx]), 0) / totLoad
     );
     const unhedged = stacks.reduce((acc, s) => acc + (s[5] - s[4]), 0) / totLoad;
-    const prices = [PRODUCT_PRICES.base, PRODUCT_PRICES.peak, PRODUCT_PRICES.wind, PRODUCT_PRICES.pv];
-    return pcts.reduce((acc, pct, i) => acc + pct * prices[i], 0) + unhedged * PRODUCT_PRICES.spot;
-  }, [stacks]);
+    const prices = [productPrices.base, productPrices.peak, productPrices.wind, productPrices.pv];
+    return pcts.reduce((acc, pct, i) => acc + pct * prices[i], 0) + unhedged * dynamicSpotPrice;
+  }, [stacks, dynamicSpotPrice, loadData, productPrices]);
 
   const savingsCt  = arbeitspreis - blendedPrice;
   const savingsPct = arbeitspreis > 0 ? (savingsCt / arbeitspreis * 100) : 0;
-  const savingsEur = Math.round(savingsCt / 100 * COMPANY.stromMWh * 1000);
+  const savingsEur = Math.round(savingsCt / 100 * actualMWh * 1000);
 
-  const optimise = () => setSliders(OPTIMAL_SLIDERS);
+  const optimise = () => {
+    /* Reference portfolio: productMaxes calibrated so 100% = ref MWh from sheet */
+    if (refVolumes) { setSliders({ base:100, peak:100, wind:100, pv:0 }); return; }
+    if (!loadData) return;
+
+    /* Fallback: constraint-based grid search */
+    const pm = productMaxes;
+    const totLoad = loadData.reduce((a,b)=>a+b, 0);
+    const evalCfg = (b,pk,w,pv) => {
+      const sf = { base:b/100, peak:pk/100, wind:w/100, pv:pv/100 };
+      let over=0;
+      const sl = loadData.map((load,i) => {
+        const r1=sf.base*pm.base*PROFILES.base[i];
+        const r2=r1+sf.peak*pm.peak*PROFILES.peak[i];
+        const r3=r2+sf.wind*pm.wind*PROFILES.wind[i];
+        const r4=r3+sf.pv*pm.pv*PROFILES.pv[i];
+        const s1=Math.min(r1,load), s2=Math.min(r2,load), s3=Math.min(r3,load), s4=Math.min(r4,load);
+        over+=Math.max(0,r4-load);
+        return [0,s1,s2,s3,s4,load,r4];
+      });
+      const cov=sl.reduce((a,s)=>a+s[4],0)/totLoad*100;
+      const ueb=over/totLoad*100;
+      const termCov=sl.reduce((a,s)=>a+s[2],0)/totLoad*100;
+      const windCov=loadData.reduce((a,load,i)=>a+Math.min(sf.wind*pm.wind*PROFILES.wind[i],load),0)/totLoad;
+      const pvCov=loadData.reduce((a,load,i)=>a+Math.min(sf.pv*pm.pv*PROFILES.pv[i],load),0)/totLoad;
+      const spotDyn=productPrices.spot*(1+0.18*(windCov+pvCov));
+      const pcts=[0,1,2,3].map(idx=>sl.reduce((a,s)=>a+(s[idx+1]-s[idx]),0)/totLoad);
+      const unhedgedFrac=sl.reduce((a,s)=>a+(s[5]-s[4]),0)/totLoad;
+      const price=pcts.reduce((a,pct,i)=>a+pct*[productPrices.base,productPrices.peak,productPrices.wind,productPrices.pv][i],0)+unhedgedFrac*spotDyn;
+      return { cov, ueb, price, termCov };
+    };
+    let best=null, bestPrice=Infinity;
+    for(let b=0;b<=100;b+=5) for(let pk=0;pk<=100;pk+=5) for(let w=0;w<=100;w+=5) for(let pv=0;pv<=100;pv+=5){
+      const {cov,ueb,price,termCov}=evalCfg(b,pk,w,pv);
+      if(cov>=80 && ueb<6 && termCov>=40 && price<bestPrice){ bestPrice=price; best={base:b,peak:pk,wind:w,pv}; }
+    }
+    if(best) setSliders(best);
+  };
 
   const setSlider = (key, val) => setSliders(p => ({ ...p, [key]: Number(val) }));
+
+  /* Überdeckung color: blue (low) → amber (6%) → red (high) */
+  const uebColor = val => {
+    const v = parseFloat(val) || 0;
+    if (v <= 6) {
+      const t = v / 6;
+      return `rgb(${Math.round(59+t*(251-59))},${Math.round(130+t*(191-130))},${Math.round(246-t*(246-36))})`;
+    }
+    const t = Math.min(1, (v - 6) / 8);
+    return `rgb(${Math.round(220+t*15)},${Math.round(Math.max(0,38-t*38))},${Math.round(Math.max(0,38-t*38))})`;
+  };
 
   return (
     <div className="max-w-screen-xl mx-auto px-8 py-5 flex flex-col gap-5">
@@ -263,7 +485,12 @@ const StrategieTab = ({ arbeitspreis }) => {
       <div className="bg-white rounded-2xl border" style={{ borderColor: C.lgray }}>
         <div className="px-6 pt-5 pb-2 flex items-start justify-between">
           <div>
-            <div className="text-xs font-medium" style={{ color: C.dgray }}>Netzbezug (Hauptwerk)</div>
+            <div className="flex items-center gap-2">
+              <div className="text-xs font-medium" style={{ color: C.dgray }}>Netzbezug (Hauptwerk)</div>
+              {loadStatus === 'loading' && <span className="text-xs px-2 py-0.5 rounded-full" style={{background:'#F3F4F6',color:C.dgray}}>Lade Daten…</span>}
+              {loadStatus === 'live'    && <span className="text-xs px-2 py-0.5 rounded-full font-semibold" style={{background:'#D1FAE5',color:'#065F46'}}>● Live · {actualMWh.toLocaleString('de-DE')} MWh/a</span>}
+              {loadStatus === 'fallback'&& <span className="text-xs px-2 py-0.5 rounded-full" style={{background:'#FEF3C7',color:'#92400E'}}>Beispieldaten</span>}
+            </div>
             <div className="text-xs mt-0.5" style={{ color: '#9CA3AF' }}>kW · Durchschnittliche Woche</div>
           </div>
           <div className="flex items-center gap-5">
@@ -276,6 +503,10 @@ const StrategieTab = ({ arbeitspreis }) => {
             <div className="flex items-center gap-1.5 text-xs" style={{ color: '#9CA3AF' }}>
               <div className="w-3 h-3 rounded-sm bg-gray-200"/>
               Ungedeckt
+            </div>
+            <div className="flex items-center gap-1.5 text-xs" style={{ color: '#EF4444' }}>
+              <div className="w-3 h-3 rounded-sm" style={{ background:'#EF4444', opacity:0.6 }}/>
+              Überdeckung
             </div>
           </div>
         </div>
@@ -294,7 +525,8 @@ const StrategieTab = ({ arbeitspreis }) => {
             <line key={d} x1={dayX(d)} y1={PT} x2={dayX(d)} y2={yBottom} stroke="#E5E7EB" strokeWidth="0.8"/>
           ))}
 
-          {/* Stacked product fills */}
+          {/* Stacked product fills — only when data is loaded */}
+          {stacks.length > 0 && <>
           {/* Unhedged */}
           <path d={areaPath(stacks.map(s=>s[5]), stacks.map(s=>s[4]))} fill="#E5E7EB" opacity="0.75"/>
           {/* PV */}
@@ -305,9 +537,17 @@ const StrategieTab = ({ arbeitspreis }) => {
           <path d={areaPath(stacks.map(s=>s[2]), stacks.map(s=>s[1]))} fill={C.blue} opacity="0.65"/>
           {/* Base */}
           <path d={areaPath(stacks.map(s=>s[1]), stacks.map(s=>s[0]))} fill={C.darkblue} opacity="0.75"/>
-
+          {/* Überdeckung — red area above load line where raw hedging exceeds load */}
+          <path d={areaPath(stacks.map(s=>Math.max(s[5], s[6])), stacks.map(s=>s[5]))} fill="#EF4444" opacity="0.45"/>
           {/* Load profile line — drawn on top */}
           <path d={loadLine} fill="none" stroke={C.darkblue} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round"/>
+          </>}
+          {/* Loading placeholder */}
+          {stacks.length === 0 && (
+            <text x={W/2} y={H/2} textAnchor="middle" fontSize="13" fill={C.dgray}>
+              {loadStatus === 'error' ? 'Fehler beim Laden der Lastgangdaten' : 'Lastgang wird geladen…'}
+            </text>
+          )}
 
           {/* Day labels */}
           {DAY_LABELS.map((label, d) => (
@@ -333,7 +573,7 @@ const StrategieTab = ({ arbeitspreis }) => {
               className="flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm flex-shrink-0 active:scale-95 transition-transform"
               style={{ background:C.yellow, color:C.darkblue, boxShadow:'0 2px 10px rgba(226,236,43,.4)' }}>
               <svg width="13" height="13" viewBox="0 0 16 16"><path d="M8 1l1.8 3.6 4 .6-2.9 2.8.7 4L8 10l-3.6 1.9.7-4L2.2 5.2l4-.6z" fill={C.darkblue}/></svg>
-              Strategie optimieren
+              {refVolumes ? 'Referenzportfolio laden' : 'Strategie optimieren'}
             </button>
           </div>
           <div className="flex flex-col gap-5">
@@ -347,9 +587,10 @@ const StrategieTab = ({ arbeitspreis }) => {
                   </div>
                   <div className="flex items-center gap-3">
                     <span className="text-xs font-medium" style={{ color: C.dgray }}>
-                      {Math.round(sliders[p.key]/100 * p.max)} kW
+                      {Math.round(sliders[p.key]/100 * productMaxes[p.key])} kW
                     </span>
                     <span className="text-sm font-bold w-10 text-right" style={{ color: p.color }}>{sliders[p.key]}%</span>
+
                   </div>
                 </div>
                 <input type="range" min="0" max="100" value={sliders[p.key]}
@@ -358,42 +599,115 @@ const StrategieTab = ({ arbeitspreis }) => {
                   style={{ background:`linear-gradient(to right,${p.fillColor} ${sliders[p.key]}%,#E5E7EB ${sliders[p.key]}%)`, accentColor:p.fillColor }}/>
                 <div className="flex justify-between mt-0.5 text-xs" style={{ color:'#9CA3AF' }}>
                   <span>0%</span>
-                  <span style={{ color:p.color, fontWeight:600 }}>{coverage[idx]}% des Lastgangs gedeckt</span>
+                  <span style={{ color:p.color, fontWeight:600 }}>{loadData ? `${coverage.perProduct[idx]}% gedeckt` : '—'}</span>
                   <span>100%</span>
                 </div>
               </div>
             ))}
           </div>
+
+          {/* ── Deckungsstruktur – horizontaler Stacked Bar ── */}
+          {/* ── Deckungsstruktur – horizontaler Stacked Bar ── */}
+          {!loadData ? (
+            <div className="mt-5 pt-5 border-t text-sm text-center py-4" style={{ borderColor:'#F3F4F6', color:C.dgray }}>
+              {loadStatus==='error' ? 'Lastgangdaten konnten nicht geladen werden' : 'Lastgang wird geladen…'}
+            </div>
+          ) : (() => {
+            const sc = stackedCoverage;
+            const uebVal = parseFloat(sc.ueb);
+            const total = 100 + uebVal;
+            const segs = [
+              { label:'Base',     val:sc.base,     color:C.darkblue },
+              { label:'Peak',     val:sc.peak,     color:C.blue },
+              { label:'Wind PPA', val:sc.wind,     color:'#0D9488' },
+              { label:'PV-PPA',   val:sc.pv,       color:'#16A34A' },
+              { label:'Spot',     val:sc.unhedged, color:'#D1D5DB' },
+            ];
+            const hedgedPct = (sc.base+sc.peak+sc.wind+sc.pv).toFixed(1);
+            const termPct = (sc.base+sc.peak).toFixed(1);
+            return (
+              <div className="mt-5 pt-5 border-t" style={{ borderColor:'#F3F4F6' }}>
+                <div className="flex justify-between items-end mb-2">
+                  <span className="text-xs font-bold" style={{ color:C.darkblue }}>Deckungsstruktur</span>
+                  <div className="flex items-center gap-3 text-xs" style={{ color:C.dgray }}>
+                    <span>Terminmarkt: <b style={{color:C.darkblue}}>{termPct}%</b></span>
+                    <span>Gesamt: <b style={{color:C.blue}}>{hedgedPct}%</b></span>
+                    {uebVal > 0 && <span style={{color:uebColor(sc.ueb)}}>Überdeckung: <b>{sc.ueb.toFixed(1)}%</b></span>}
+                  </div>
+                </div>
+                <div className="relative h-8 rounded-xl overflow-hidden flex" style={{background:'#F3F4F6'}}>
+                  {segs.map(seg => (
+                    <div key={seg.label} className="h-full flex-shrink-0 transition-all duration-500"
+                      style={{width:`${seg.val/total*100}%`, background:seg.color, opacity: seg.label==='Spot' ? 0.5 : 0.82}}/>
+                  ))}
+                  {uebVal > 0 && (
+                    <div className="h-full flex-shrink-0 transition-all duration-500"
+                      style={{width:`${uebVal/total*100}%`, background:uebColor(uebVal), opacity:0.75}}/>
+                  )}
+                  <div className="absolute inset-y-0 border-l-2 border-dashed border-white opacity-80"
+                    style={{left:`${100/total*100}%`}}/>
+                </div>
+                <div className="relative mt-1" style={{height:'14px'}}>
+                  <span className="absolute text-xs" style={{left:'0%', color:'#9CA3AF'}}>0%</span>
+                  <span className="absolute text-xs font-semibold" style={{left:`${100/total*100}%`, transform:'translateX(-50%)', color:C.dgray}}>100%</span>
+                  {uebVal > 0 && <span className="absolute text-xs" style={{right:'0%', color:'#EF4444'}}>{total.toFixed(1)}%</span>}
+                </div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
+                  {segs.map(seg => (
+                    <div key={seg.label} className="flex items-center gap-1.5 text-xs" style={{color:C.dgray}}>
+                      <div className="w-2 h-2 rounded-sm flex-shrink-0" style={{background:seg.color}}/>
+                      {seg.label}: {seg.val.toFixed(1)}%
+                    </div>
+                  ))}
+                  {uebVal > 0 && (
+                    <div className="flex items-center gap-1.5 text-xs" style={{color:uebColor(sc.ueb)}}>
+                      <div className="w-2 h-2 rounded-sm flex-shrink-0" style={{background:uebColor(sc.ueb)}}/>
+                      Überdeckung: {sc.ueb.toFixed(1)}%
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Coverage stats card */}
         <div className="flex flex-col gap-4">
 
-          {/* Product breakdown */}
+          {/* Spotmarkt-Dynamik */}
           <div className="bg-white rounded-2xl border p-5 flex-1" style={{ borderColor: C.lgray }}>
-            <div className="font-bold text-sm mb-4" style={{ color: C.darkblue }}>Abdeckung im Lastgang</div>
-            {PRODUCTS.map((p, idx) => (
-              <div key={p.key} className="flex items-center gap-3 mb-3 last:mb-0">
-                <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: p.fillColor }}/>
-                <span className="text-sm flex-1" style={{ color:'#374151' }}>{p.label}</span>
-                <div className="flex-1 h-2 rounded-full overflow-hidden bg-gray-100">
+            <div className="font-bold text-sm mb-1" style={{ color: C.darkblue }}>Spotmarkt-Dynamik</div>
+            <p className="text-xs mb-4" style={{ color: C.dgray }}>Höherer PPA-Anteil erhöht den Residuallastpreis am Spot — die Einsparung wird teilweise kompensiert.</p>
+            <div className="flex gap-3 mb-4">
+              <div className="flex-1 rounded-xl p-3" style={{ background:'#F9FAFB', border:'1.5px solid #F0F0F0' }}>
+                <div className="text-xs mb-1" style={{ color:C.dgray }}>Basis Spot</div>
+                <div className="font-bold text-xl leading-none" style={{ color:C.darkblue }}>{productPrices.spot.toFixed(2)}</div>
+                <div className="text-xs mt-0.5" style={{ color:C.dgray }}>ct/kWh</div>
+              </div>
+              <div className="flex items-center text-lg" style={{ color:C.lgray }}>→</div>
+              <div className="flex-1 rounded-xl p-3" style={{ background: dynamicSpotPrice > productPrices.spot+0.01 ? '#FEF2F2' : '#F0F9FF', border:`1.5px solid ${dynamicSpotPrice > productPrices.spot+0.01 ? '#FCA5A5' : '#BAE6FD'}` }}>
+                <div className="text-xs mb-1" style={{ color:C.dgray }}>Effektiver Spot</div>
+                <div className="font-bold text-xl leading-none" style={{ color: dynamicSpotPrice > productPrices.spot+0.01 ? '#DC2626' : C.blue }}>{dynamicSpotPrice.toFixed(2)}</div>
+                <div className="text-xs mt-0.5" style={{ color:C.dgray }}>ct/kWh</div>
+              </div>
+            </div>
+            {dynamicSpotPrice > productPrices.spot+0.01 && (
+              <div className="text-xs rounded-lg px-3 py-2 mb-3" style={{ background:'#FEF2F2', color:'#DC2626' }}>
+                +{((dynamicSpotPrice/productPrices.spot-1)*100).toFixed(1)}% durch PPA-Anteil ({(parseFloat(coverage.perProduct[2])+parseFloat(coverage.perProduct[3])).toFixed(1)}% Lastgang)
+              </div>
+            )}
+            <div className="pt-3 border-t" style={{ borderColor:'#F3F4F6' }}>
+              <div className="text-xs font-semibold mb-2" style={{ color:C.dgray }}>Überdeckung</div>
+              <div className="flex items-center gap-3">
+                <div className="flex-1 h-2.5 rounded-full overflow-hidden bg-gray-100">
                   <div className="h-full rounded-full transition-all duration-500"
-                    style={{ width:`${coverage[idx]}%`, background: p.fillColor, opacity:0.8 }}/>
+                    style={{ width:`${Math.min(100, parseFloat(coverage.ueberdeckung)/Math.max(parseFloat(coverage.ueberdeckung),8)*100)}%`, background:uebColor(coverage.ueberdeckung) }}/>
                 </div>
-                <span className="text-sm font-bold w-12 text-right" style={{ color: p.color }}>{coverage[idx]}%</span>
+                <span className="text-sm font-bold w-14 text-right flex-shrink-0" style={{ color:uebColor(coverage.ueberdeckung) }}>
+                  {coverage.ueberdeckung}%
+                  <span className="text-xs font-normal ml-0.5" style={{color:C.dgray}}>/ 6%</span>
+                </span>
               </div>
-            ))}
-            {/* Unhedged */}
-            <div className="flex items-center gap-3 mt-3 pt-3 border-t" style={{ borderColor:'#F3F4F6' }}>
-              <div className="w-2.5 h-2.5 rounded-sm flex-shrink-0 bg-gray-300"/>
-              <span className="text-sm flex-1" style={{ color: C.dgray }}>Ungedeckt (Spot)</span>
-              <div className="flex-1 h-2 rounded-full overflow-hidden bg-gray-100">
-                <div className="h-full rounded-full transition-all duration-500 bg-gray-300"
-                  style={{ width:`${Math.max(0, 100 - coverage.reduce((a,b)=>a+parseFloat(b),0)).toFixed(1)}%` }}/>
-              </div>
-              <span className="text-sm font-bold w-12 text-right" style={{ color: C.dgray }}>
-                {Math.max(0, 100 - coverage.reduce((a,b)=>a+parseFloat(b),0)).toFixed(1)}%
-              </span>
             </div>
           </div>
 
@@ -433,72 +747,82 @@ const StrategieTab = ({ arbeitspreis }) => {
         <div className="flex items-stretch gap-4">
 
           {/* Current Arbeitspreis */}
-          <div className="flex-1 rounded-xl p-5 flex flex-col justify-between" style={{ background:'#F9FAFB', border:`1.5px solid ${C.lgray}` }}>
-            <div className="text-xs font-semibold mb-2" style={{ color:C.dgray }}>Aktueller Arbeitspreis</div>
-            <div>
-              <span className="font-bold" style={{ color:C.darkblue, fontSize:'2.4rem', lineHeight:1 }}>{arbeitspreis.toFixed(2)}</span>
-              <span className="text-sm ml-1" style={{ color:C.dgray }}>ct/kWh</span>
+          <div className="flex-1 rounded-xl p-5 flex flex-col gap-3" style={{ background:'#F9FAFB', border:`1.5px solid ${C.lgray}` }}>
+            <div className="text-xs font-semibold uppercase tracking-wide" style={{ color:C.dgray }}>Aktueller Arbeitspreis</div>
+            <div className="flex items-baseline gap-1.5">
+              <span className="font-bold leading-none" style={{ color:C.darkblue, fontSize:'2.2rem' }}>{arbeitspreis.toFixed(2)}</span>
+              <span className="text-sm font-medium" style={{ color:C.dgray }}>ct/kWh</span>
             </div>
-            <div className="text-xs mt-2" style={{ color:'#9CA3AF' }}>Eingabe im Header — Basiswert für Einsparungsrechnung</div>
+            <div className="mt-auto text-xs" style={{ color:'#9CA3AF' }}>Eingabe im Header · Basiswert für Einsparungsrechnung</div>
           </div>
 
           {/* Arrow */}
-          <div className="flex items-center px-2 text-2xl" style={{ color:C.lgray }}>→</div>
+          <div className="flex items-center px-1 text-xl font-light" style={{ color:C.lgray }}>→</div>
 
           {/* Portfolio price breakdown */}
-          <div className="flex-1 rounded-xl p-5" style={{ background:'#F0F4FF', border:`1.5px solid ${C.lblue}` }}>
-            <div className="text-xs font-semibold mb-2" style={{ color:C.darkblue }}>Berechneter Portfoliopreis</div>
-            <div className="mb-3">
-              <span className="font-bold" style={{ color:C.blue, fontSize:'2.4rem', lineHeight:1 }}>{blendedPrice.toFixed(2)}</span>
-              <span className="text-sm ml-1" style={{ color:C.dgray }}>ct/kWh</span>
+          <div className="flex-[1.5] rounded-xl p-5 flex flex-col gap-3" style={{ background:'#F0F4FF', border:`1.5px solid ${C.lblue}` }}>
+            <div className="text-xs font-semibold uppercase tracking-wide" style={{ color:C.darkblue }}>Berechneter Portfoliopreis</div>
+            <div className="flex items-baseline gap-1.5">
+              <span className="font-bold leading-none" style={{ color:C.blue, fontSize:'2.2rem' }}>
+                {loadData ? blendedPrice.toFixed(2) : '—'}
+              </span>
+              <span className="text-sm font-medium" style={{ color:C.dgray }}>ct/kWh</span>
             </div>
-            <div className="flex flex-col gap-1">
+            {/* Component breakdown */}
+            <div className="flex flex-col gap-1.5 pt-2 border-t" style={{ borderColor:'#D1D9FF' }}>
               {(() => {
-                const totLoad = LOAD.reduce((a,b)=>a+b,0);
+                if (!loadData || stacks.length === 0) return <div className="text-xs" style={{color:C.dgray}}>Lade Daten…</div>;
+                const totLoad = loadData.reduce((a,b)=>a+b, 0);
                 const layerPcts = [0,1,2,3].map(idx =>
                   stacks.reduce((acc,s)=>acc+(s[idx+1]-s[idx]),0)/totLoad*100
                 );
                 const spotPct = stacks.reduce((acc,s)=>acc+(s[5]-s[4]),0)/totLoad*100;
                 return [
-                  { key:'base',  label:'Base',            color:'#1a3a8a', pct:layerPcts[0] },
-                  { key:'peak',  label:'Peak',            color:C.blue,    pct:layerPcts[1] },
-                  { key:'wind',  label:'Wind PPA',        color:'#0D9488', pct:layerPcts[2] },
-                  { key:'pv',    label:'PV-PPA',          color:'#16A34A', pct:layerPcts[3] },
-                  { key:'spot',  label:'Ungedeckt (Spot)',color:C.dgray,   pct:spotPct       },
-                ];
-              })().map(({ key, label, color, pct }) => {
-                return pct > 0.5 ? (
-                  <div key={key} className="flex items-center gap-2 text-xs">
+                  { key:'base', label:'Base',             color:'#1a3a8a', pct:layerPcts[0], price:productPrices.base },
+                  { key:'peak', label:'Peak',             color:C.blue,    pct:layerPcts[1], price:productPrices.peak },
+                  { key:'wind', label:'Wind PPA',         color:'#0D9488', pct:layerPcts[2], price:productPrices.wind },
+                  { key:'pv',   label:'PV-PPA',           color:'#16A34A', pct:layerPcts[3], price:productPrices.pv   },
+                  { key:'spot', label:'Spot (ungedeckt)', color:C.dgray,   pct:spotPct,      price:dynamicSpotPrice    },
+                ].filter(r => r.pct > 0.3).map(({ key, label, color, pct, price }) => (
+                  <div key={key} className="flex items-center gap-2">
                     <div className="w-2 h-2 rounded-sm flex-shrink-0" style={{ background:color }}/>
-                    <span className="flex-1" style={{ color:'#374151' }}>{label}</span>
-                    <span style={{ color:C.dgray }}>{pct.toFixed(1)}%</span>
-                    <span className="font-semibold w-20 text-right" style={{ color:C.darkblue }}>
-                      {(pct/100 * PRODUCT_PRICES[key]).toFixed(3)} ct
+                    <span className="text-xs flex-1" style={{ color:'#374151' }}>{label}</span>
+                    <span className="text-xs font-medium tabular-nums" style={{ color:C.dgray }}>{pct.toFixed(1)}%</span>
+                    <span className="text-xs font-bold tabular-nums w-20 text-right" style={{ color }}>
+                      {price.toFixed(2)} ct/kWh
                     </span>
                   </div>
-                ) : null;
-              })}
+                ));
+              })()}
             </div>
           </div>
 
           {/* Arrow */}
-          <div className="flex items-center px-2 text-2xl" style={{ color:C.lgray }}>→</div>
+          <div className="flex items-center px-1 text-xl font-light" style={{ color:C.lgray }}>→</div>
 
           {/* Savings */}
-          <div className="flex-1 rounded-xl p-5 flex flex-col justify-between"
-            style={{ background: savingsCt > 0 ? C.yellow : '#FEF2F2', border:`1.5px solid ${savingsCt>0?'#c8d400':'#FCA5A5'}` }}>
-            <div className="text-xs font-semibold mb-2" style={{ color:C.darkblue }}>Einsparung vs. Arbeitspreis</div>
-            <div>
-              <div className="font-bold" style={{ color:savingsCt>0?C.darkblue:'#DC2626', fontSize:'2.4rem', lineHeight:1 }}>
-                {savingsCt>0?'-':'+'}{ Math.abs(savingsPct).toFixed(1)}%
+          <div className="flex-1 rounded-xl p-5 flex flex-col gap-3"
+            style={{ background: !loadData ? '#F9FAFB' : savingsCt > 0 ? C.yellow : '#FEF2F2', border:`1.5px solid ${!loadData ? C.lgray : savingsCt>0?'#c8d400':'#FCA5A5'}` }}>
+            <div className="text-xs font-semibold uppercase tracking-wide" style={{ color:C.darkblue }}>Einsparung vs. Arbeitspreis</div>
+            {!loadData ? (
+              <div className="flex-1 flex items-center justify-center text-sm" style={{color:C.dgray}}>
+                {loadStatus==='error' ? 'Daten konnten nicht geladen werden' : 'Wird berechnet…'}
               </div>
-              <div className="text-sm font-bold mt-1" style={{ color:savingsCt>0?C.darkblue:'#DC2626' }}>
-                {savingsCt>0?'≈ -':'+'}{ Math.abs(savingsEur).toLocaleString('de-DE')} €/Jahr
+            ) : (
+              <>
+              <div>
+                <div className="font-bold leading-none" style={{ color:savingsCt>0?C.darkblue:'#DC2626', fontSize:'2.2rem' }}>
+                  {savingsCt>0?'−':'+'}{ Math.abs(savingsPct).toFixed(1)}%
+                </div>
+                <div className="text-sm font-bold mt-1.5" style={{ color:savingsCt>0?C.darkblue:'#DC2626' }}>
+                  {savingsCt>0?'≈ −':'+'}{ Math.abs(savingsEur).toLocaleString('de-DE')} €/Jahr
+                </div>
               </div>
-            </div>
-            <div className="text-xs mt-2" style={{ color:C.darkblue, opacity:0.6 }}>
-              {arbeitspreis.toFixed(2)} → {blendedPrice.toFixed(2)} ct/kWh · {COMPANY.stromMWh.toLocaleString('de-DE')} MWh/a
-            </div>
+              <div className="mt-auto text-xs" style={{ color:C.darkblue, opacity:0.55 }}>
+                {arbeitspreis.toFixed(2)} → {blendedPrice.toFixed(2)} ct/kWh · {actualMWh.toLocaleString('de-DE')} MWh/a
+              </div>
+              </>
+            )}
           </div>
 
         </div>
