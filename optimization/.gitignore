@@ -1,0 +1,19 @@
+# Generated outputs — too large for git
+archive/
+plots/
+data/hourly_results/
+data/temp/
+data/prices/PFC/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+src/__pycache__/
+
+# Jupyter checkpoints
+.ipynb_checkpoints/
+
+# Secrets / tokens
+src/token.csv
+src/entsoe_token
