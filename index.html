@@ -176,7 +176,7 @@ const PRODUCTS = [
   { key:'pv',    label:'PV-PPA',   color:'#16A34A',  fillColor:'#16A34A', desc:'Tägliches Sonnenstrahlungsprofil', max:PV_MAX   },
 ];
 // Reference prices per product (ct/kWh) and optimal slider preset
-const PRODUCT_PRICES = { base:9.05, peak:11.38, wind:8.00, pv:6.2, spot:13.11 };
+const PRODUCT_PRICES = { base:9.05, peak:11.38, wind:8.00, pv:6.2, spot:9.045 };
 
 const SHEETS_REF_CSV = 'https://docs.google.com/spreadsheets/d/1jOfwcirxhYVyIDVJKzGzJpJEnYZYoWmwaE7ldByQEcI/gviz/tq?tqx=out:csv&sheet=8)%20Ref%20Price';
 
@@ -529,7 +529,7 @@ const StrategieTab = ({ arbeitspreis }) => {
               className="flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm flex-shrink-0 active:scale-95 transition-transform"
               style={{ background:C.yellow, color:C.darkblue, boxShadow:'0 2px 10px rgba(226,236,43,.4)' }}>
               <svg width="13" height="13" viewBox="0 0 16 16"><path d="M8 1l1.8 3.6 4 .6-2.9 2.8.7 4L8 10l-3.6 1.9.7-4L2.2 5.2l4-.6z" fill={C.darkblue}/></svg>
-              {refVolumes ? 'Referenzportfolio laden' : 'Strategie optimieren'}
+              Optimale Strategie
             </button>
           </div>
           <div className="flex flex-col gap-5">
@@ -545,19 +545,15 @@ const StrategieTab = ({ arbeitspreis }) => {
                     <span className="text-xs font-medium" style={{ color: C.dgray }}>
                       {Math.round(sliders[p.key]/100 * productMaxes[p.key])} kW
                     </span>
-                    <span className="text-sm font-bold w-10 text-right" style={{ color: p.color }}>{sliders[p.key]}%</span>
-
+                    <span className="text-sm font-bold w-20 text-right" style={{ color: p.color }}>
+                      {loadData ? `${coverage.perProduct[idx]}% gedeckt` : `${sliders[p.key]}%`}
+                    </span>
                   </div>
                 </div>
                 <input type="range" min="0" max="100" value={sliders[p.key]}
                   onChange={e => setSlider(p.key, e.target.value)}
                   className="w-full"
                   style={{ background:`linear-gradient(to right,${p.fillColor} ${sliders[p.key]}%,#E5E7EB ${sliders[p.key]}%)`, accentColor:p.fillColor }}/>
-                <div className="flex justify-between mt-0.5 text-xs" style={{ color:'#9CA3AF' }}>
-                  <span>0%</span>
-                  <span style={{ color:p.color, fontWeight:600 }}>{loadData ? `${coverage.perProduct[idx]}% gedeckt` : '—'}</span>
-                  <span>100%</span>
-                </div>
               </div>
             ))}
           </div>
@@ -602,11 +598,6 @@ const StrategieTab = ({ arbeitspreis }) => {
                   )}
                   <div className="absolute inset-y-0 border-l-2 border-dashed border-white opacity-80"
                     style={{left:`${100/total*100}%`}}/>
-                </div>
-                <div className="relative mt-1" style={{height:'14px'}}>
-                  <span className="absolute text-xs" style={{left:'0%', color:'#9CA3AF'}}>0%</span>
-                  <span className="absolute text-xs font-semibold" style={{left:`${100/total*100}%`, transform:'translateX(-50%)', color:C.dgray}}>100%</span>
-                  {uebVal > 0 && <span className="absolute text-xs" style={{right:'0%', color:'#EF4444'}}>{total.toFixed(1)}%</span>}
                 </div>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
                   {segs.map(seg => (
