@@ -111,15 +111,51 @@ const FileRow = ({ file, onRemove }) => {
   );
 };
 
+/* ── Selection button group ── */
+const SelectGroup = ({ label, options, value, onChange, disabled = false }) => (
+  <div>
+    <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: disabled ? C.lgray : C.dgray }}>
+      {label}
+    </label>
+    <div className="flex gap-2 flex-wrap">
+      {options.map(opt => {
+        const active = value === opt.value;
+        return (
+          <button
+            key={opt.value}
+            disabled={disabled}
+            onClick={() => !disabled && onChange(opt.value)}
+            className="px-4 py-2 rounded-xl text-sm font-semibold border-2 transition-all"
+            style={{
+              borderColor: disabled ? '#E5E7EB' : active ? C.blue : '#E5E7EB',
+              background: disabled ? '#F9FAFB' : active ? C.blue : '#fff',
+              color: disabled ? C.lgray : active ? '#fff' : C.darkblue,
+              cursor: disabled ? 'not-allowed' : 'pointer',
+              opacity: disabled ? 0.5 : 1,
+            }}>
+            {opt.label}
+          </button>
+        );
+      })}
+    </div>
+  </div>
+);
+
 /* ── Main App ── */
 const App = () => {
   const [step, setStep] = useState(1);
   const [company, setCompany] = useState('');
+  const [lieferjahr, setLieferjahr] = useState('2027');
+  const [energietraeger, setEnergietraeger] = useState('Strom');
+  const [gruenstrom, setGruenstrom] = useState('Nein');
+  const [bonitaet, setBonitaet] = useState('unbekannt');
   const [files, setFiles] = useState([]);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState('');
   const dropRef = useRef(null);
   const inputRef = useRef(null);
+
+  const isGas = energietraeger === 'Gas';
 
   const addFiles = useCallback((incoming) => {
     const csvs = Array.from(incoming).filter(f =>
@@ -149,13 +185,15 @@ const App = () => {
   const canProceedStep1 = company.trim().length >= 2;
   const canProceedStep2 = files.length > 0;
 
-  /* ── Step 1: Company name ── */
+  /* ── Step 1: Company + settings ── */
   const Step1 = () => (
-    <div className="fade-in flex flex-col gap-6 max-w-lg mx-auto">
+    <div className="fade-in flex flex-col gap-5 max-w-lg mx-auto">
       <div>
         <h2 className="text-2xl font-bold mb-1" style={{ color: C.darkblue }}>Kunde anlegen</h2>
-        <p className="text-sm" style={{ color: C.dgray }}>Gib den genauen Firmennamen ein, wie er im System erscheinen soll.</p>
+        <p className="text-sm" style={{ color: C.dgray }}>Gib den genauen Firmennamen ein und konfiguriere die Eckdaten.</p>
       </div>
+
+      {/* Company name */}
       <div>
         <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: C.dgray }}>
           Firmenname
@@ -178,10 +216,68 @@ const App = () => {
           <p className="text-xs mt-1.5" style={{ color: '#EF4444' }}>Mindestens 2 Zeichen erforderlich.</p>
         )}
       </div>
+
+      {/* Divider */}
+      <div className="border-t" style={{ borderColor: '#F0F0F0' }}/>
+
+      {/* Lieferjahr */}
+      <SelectGroup
+        label="Lieferjahr"
+        value={lieferjahr}
+        onChange={setLieferjahr}
+        options={[
+          { value:'2027', label:'2027' },
+          { value:'2028', label:'2028' },
+          { value:'2029', label:'2029' },
+        ]}
+      />
+
+      {/* Energieträger */}
+      <SelectGroup
+        label="Energieträger"
+        value={energietraeger}
+        onChange={v => { setEnergietraeger(v); if (v === 'Gas') setGruenstrom('Nein'); }}
+        options={[
+          { value:'Strom', label:'⚡ Strom' },
+          { value:'Gas',   label:'🔥 Gas' },
+        ]}
+      />
+
+      {/* Grünstrom */}
+      <div>
+        <SelectGroup
+          label="Grünstrom"
+          value={gruenstrom}
+          onChange={setGruenstrom}
+          disabled={isGas}
+          options={[
+            { value:'Ja',   label:'Ja' },
+            { value:'Nein', label:'Nein' },
+          ]}
+        />
+        {isGas && (
+          <p className="text-xs mt-1.5" style={{ color: C.lgray }}>
+            Nicht verfügbar bei Energieträger Gas.
+          </p>
+        )}
+      </div>
+
+      {/* Bonität */}
+      <SelectGroup
+        label="Bonität"
+        value={bonitaet}
+        onChange={setBonitaet}
+        options={[
+          { value:'gut',       label:'Gut' },
+          { value:'schlecht',  label:'Schlecht' },
+          { value:'unbekannt', label:'Unbekannt' },
+        ]}
+      />
+
       <button
         onClick={() => setStep(2)}
         disabled={!canProceedStep1}
-        className="flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm transition-all active:scale-95"
+        className="flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm transition-all active:scale-95 mt-1"
         style={{
           background: canProceedStep1 ? C.blue : '#E5E7EB',
           color: canProceedStep1 ? '#fff' : C.lgray,
@@ -320,11 +416,24 @@ const App = () => {
         {/* Summary card */}
         <div className="rounded-2xl border p-5 flex flex-col gap-4" style={{ borderColor: '#E5E7EB', background: '#fff' }}>
           <div className="flex items-start justify-between pb-4 border-b" style={{ borderColor: '#F3F4F6' }}>
-            <div>
-              <div className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: C.dgray }}>Kunde</div>
+            <div className="flex flex-col gap-2 flex-1">
+              <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.dgray }}>Kunde</div>
               <div className="text-lg font-bold" style={{ color: C.darkblue }}>{company}</div>
+              <div className="flex flex-wrap gap-2 mt-1">
+                {[
+                  { label: lieferjahr },
+                  { label: energietraeger },
+                  { label: energietraeger === 'Strom' ? `Grünstrom: ${gruenstrom}` : null },
+                  { label: `Bonität: ${bonitaet.charAt(0).toUpperCase() + bonitaet.slice(1)}` },
+                ].filter(t => t.label).map(t => (
+                  <span key={t.label} className="text-xs font-semibold px-2.5 py-1 rounded-full"
+                    style={{ background: '#EEF0FF', color: C.blue }}>
+                    {t.label}
+                  </span>
+                ))}
+              </div>
             </div>
-            <button onClick={() => setStep(1)} className="text-xs font-medium px-3 py-1 rounded-lg border transition-all"
+            <button onClick={() => setStep(1)} className="text-xs font-medium px-3 py-1 rounded-lg border transition-all flex-shrink-0 ml-4"
               style={{ borderColor: '#E5E7EB', color: C.blue }}>
               Ändern
             </button>
