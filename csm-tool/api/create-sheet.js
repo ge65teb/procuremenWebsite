@@ -1,6 +1,6 @@
 const https = require('https');
 
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzU5HlbKNMp9nVwxW6ZrblQRw5IfjSPuRhhXqKBGw9h8tpTaBLae6qXiaJP9iSWckWQag/exec';
+const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyQvxxn-U6J-31hZSKH4qOlf07vD62S_NsLa3pZ72Z7-2m-cNgACGLxgX3t2QyDDVzKPQ/exec';
 
 function httpsGet(url) {
   return new Promise((resolve, reject) => {
