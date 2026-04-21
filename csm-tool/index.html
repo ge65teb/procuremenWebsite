@@ -167,17 +167,31 @@ const MultiSelectGroup = ({ label, options, value, onChange }) => {
 };
 
 /* ── Number input ── */
-const NumberField = ({ label, value, onChange, min = 1, max = 20 }) => (
-  <div>
-    <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: C.dgray }}>{label}</label>
-    <input
-      type="number" min={min} max={max} value={value}
-      onChange={e => onChange(Math.max(min, Math.min(max, parseInt(e.target.value) || min)))}
-      className="w-full px-4 py-3 rounded-xl border-2 text-sm font-medium outline-none transition-all"
-      style={{ borderColor: C.blue, color: C.darkblue, background: '#fff' }}
-    />
-  </div>
-);
+const NumberField = ({ label, value, onChange, min = 1, max = 20 }) => {
+  const [raw, setRaw] = React.useState(String(value));
+  React.useEffect(() => { setRaw(String(value)); }, [value]);
+  return (
+    <div>
+      <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: C.dgray }}>{label}</label>
+      <input
+        type="number" min={min} max={max} value={raw}
+        onChange={e => {
+          setRaw(e.target.value);
+          const n = parseInt(e.target.value);
+          if (!isNaN(n)) onChange(Math.max(min, Math.min(max, n)));
+        }}
+        onBlur={() => {
+          const n = parseInt(raw);
+          const clamped = isNaN(n) ? min : Math.max(min, Math.min(max, n));
+          setRaw(String(clamped));
+          onChange(clamped);
+        }}
+        className="w-full px-4 py-3 rounded-xl border-2 text-sm font-medium outline-none transition-all"
+        style={{ borderColor: C.blue, color: C.darkblue, background: '#fff' }}
+      />
+    </div>
+  );
+};
 
 /* ── File row ── */
 const FileRow = ({ file, onRemove }) => (
@@ -233,7 +247,7 @@ const App = () => {
 
   const isGas      = energietraeger === 'Gas';
   const isPvVorhanden = pvStatus === 'vorhanden';
-  const ppaDisabled = bonitaet === 'schlecht' || isGas;
+  const ppaDisabled = bonitaet === 'schlecht';
 
   /* sync PV-Anlagen array when count changes */
   const updatePvAnzahl = (n) => {
@@ -320,39 +334,35 @@ const App = () => {
         {isGas && <p className="text-xs mt-1.5" style={{ color: C.lgray }}>Nicht verfügbar bei Energieträger Gas.</p>}
       </div>
 
-      {/* PPA — hidden/disabled when Bonität = schlecht or Gas */}
-      {!ppaDisabled && (
-        <div className="fade-in">
+      {/* PPA — greyed out (not hidden) when Bonität = schlecht or Gas */}
+      {!isGas && (
+        <div>
           <SelectGroup
             label="PPA"
             value={ppa}
             onChange={setPpa}
+            disabled={ppaDisabled}
             options={[{ value:'Ja', label:'Ja' }, { value:'Nein', label:'Nein' }]}
           />
-        </div>
-      )}
-      {ppaDisabled && bonitaet === 'schlecht' && (
-        <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs" style={{ background:'#FEF3C7', color:'#92400E' }}>
-          <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
-            <circle cx="7" cy="7" r="6" stroke="#92400E" strokeWidth="1.4"/>
-            <line x1="7" y1="4" x2="7" y2="8" stroke="#92400E" strokeWidth="1.4" strokeLinecap="round"/>
-            <circle cx="7" cy="10.5" r="0.7" fill="#92400E"/>
-          </svg>
-          PPA nicht verfügbar — Bonität des Kunden ist schlecht.
+          {ppaDisabled && (
+            <p className="text-xs mt-1.5" style={{ color: C.lgray }}>Nicht verfügbar — Bonität des Kunden ist schlecht.</p>
+          )}
         </div>
       )}
 
-      <div className="border-t" style={{ borderColor: '#F0F0F0' }}/>
+      {!isGas && <div className="border-t" style={{ borderColor: '#F0F0F0' }}/>}
 
-      {/* PV-Eigenerzeugung */}
-      <SelectGroup
-        label="PV-Eigenerzeugung"
-        value={pvStatus}
-        onChange={v => { setPvStatus(v); if (v === 'nicht vorhanden') { setPvAnzahl(1); setPvAnlagen([{ leistung:'', standort:'' }]); } }}
-        options={[{ value:'vorhanden', label:'Vorhanden' }, { value:'nicht vorhanden', label:'Nicht vorhanden' }]}
-      />
+      {/* PV-Eigenerzeugung — hidden when Gas */}
+      {!isGas && (
+        <SelectGroup
+          label="PV-Eigenerzeugung"
+          value={pvStatus}
+          onChange={v => { setPvStatus(v); if (v === 'nicht vorhanden') { setPvAnzahl(1); setPvAnlagen([{ leistung:'', standort:'' }]); } }}
+          options={[{ value:'vorhanden', label:'Vorhanden' }, { value:'nicht vorhanden', label:'Nicht vorhanden' }]}
+        />
+      )}
 
-      {isPvVorhanden && (
+      {!isGas && isPvVorhanden && (
         <div className="fade-in flex flex-col gap-4 pl-4 border-l-2" style={{ borderColor: C.lblue }}>
           {/* Anzahl + Lastgänge side by side */}
           <div className="grid grid-cols-2 gap-4">
@@ -373,7 +383,7 @@ const App = () => {
             {pvAnlagen.map((anlage, idx) => (
               <div key={idx} className="fade-in rounded-xl p-4 border" style={{ background:'#FAFAFA', borderColor:'#E5E7EB' }}>
                 <div className="text-xs font-bold mb-3" style={{ color: C.blue }}>Anlage {idx + 1}</div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-3">
                   <div>
                     <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: C.dgray }}>Leistung (kWp)</label>
                     <input
@@ -385,11 +395,11 @@ const App = () => {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: C.dgray }}>Standort</label>
+                    <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: C.dgray }}>Standort (Adresse)</label>
                     <input
                       type="text" value={anlage.standort}
                       onChange={e => updatePvAnlage(idx, 'standort', e.target.value)}
-                      placeholder="z.B. München"
+                      placeholder="z.B. Musterstraße 1, 80335 München"
                       className="w-full px-3 py-2.5 rounded-xl border-2 text-sm font-medium outline-none transition-all"
                       style={{ borderColor: anlage.standort ? C.blue : '#E5E7EB', color: C.darkblue, background:'#fff' }}
                     />
@@ -495,7 +505,7 @@ const App = () => {
       lieferjahre.join(', '),
       energietraeger,
       !isGas && `Grünstrom: ${gruenstrom}`,
-      !ppaDisabled && `PPA: ${ppa}`,
+      !isGas && !ppaDisabled && `PPA: ${ppa}`,
       `Bonität: ${bonitaet.charAt(0).toUpperCase() + bonitaet.slice(1)}`,
       isPvVorhanden && `PV: ${pvAnzahl} Anlage${pvAnzahl > 1 ? 'n' : ''}`,
     ].filter(Boolean);
