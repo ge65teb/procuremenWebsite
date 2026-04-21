@@ -696,11 +696,30 @@ const App = () => {
               if (APPS_SCRIPT_URL === 'PASTE_YOUR_APPS_SCRIPT_URL_HERE') {
                 throw new Error('Apps Script URL noch nicht eingetragen.');
               }
-              const qs = new URLSearchParams({ company, lieferjahr: lieferjahre[0] });
-              const res = await fetch(`${APPS_SCRIPT_URL}?${qs}`, { redirect: 'follow' });
-              const text = await res.text();
-              let data;
-              try { data = JSON.parse(text); } catch(_) { throw new Error('Ungültige Serverantwort: ' + text.slice(0, 120)); }
+              const data = await new Promise((resolve, reject) => {
+                const cbName = 'gsc_' + Date.now();
+                const script = document.createElement('script');
+                const qs = new URLSearchParams({ company, lieferjahr: lieferjahre[0], callback: cbName });
+                const timer = setTimeout(() => {
+                  delete window[cbName];
+                  document.head.removeChild(script);
+                  reject(new Error('Timeout — Apps Script hat nicht geantwortet.'));
+                }, 30000);
+                window[cbName] = (result) => {
+                  clearTimeout(timer);
+                  delete window[cbName];
+                  document.head.removeChild(script);
+                  resolve(result);
+                };
+                script.onerror = () => {
+                  clearTimeout(timer);
+                  delete window[cbName];
+                  document.head.removeChild(script);
+                  reject(new Error('Script konnte nicht geladen werden.'));
+                };
+                script.src = APPS_SCRIPT_URL + '?' + qs;
+                document.head.appendChild(script);
+              });
               if (data.url) {
                 setSheetUrl(data.url);
               } else {
