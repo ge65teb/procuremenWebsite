@@ -194,11 +194,11 @@ const NumberField = ({ label, value, onChange, min = 1, max = 20 }) => {
 };
 
 /* ── File row ── */
-const FileRow = ({ file, onRemove }) => (
-  <div className="fade-in flex items-center justify-between px-4 py-3 rounded-xl border" style={{ background:'#fff', borderColor:'#E5E7EB' }}>
-    <div className="flex items-center gap-3">
-      <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background:'#EEF0FF' }}>
-        <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+const FileRow = ({ file, onRemove, ext }) => (
+  <div className="fade-in flex items-center justify-between px-3 py-2.5 rounded-xl border" style={{ background:'#fff', borderColor:'#E5E7EB' }}>
+    <div className="flex items-center gap-2.5">
+      <div className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background:'#EEF0FF' }}>
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
           <path d="M3 2h7l3 3v9a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z" stroke={C.blue} strokeWidth="1.3" fill="none"/>
           <path d="M10 2v3h3" stroke={C.blue} strokeWidth="1.3"/>
           <line x1="5" y1="8" x2="11" y2="8" stroke={C.blue} strokeWidth="1.2" strokeLinecap="round"/>
@@ -206,17 +206,94 @@ const FileRow = ({ file, onRemove }) => (
         </svg>
       </div>
       <div>
-        <div className="text-sm font-semibold leading-tight" style={{ color: C.darkblue }}>{file.name}</div>
-        <div className="text-xs mt-0.5" style={{ color: C.dgray }}>{(file.size/1024).toFixed(0)} KB · CSV</div>
+        <div className="text-sm font-medium leading-tight truncate" style={{ color: C.darkblue, maxWidth:'320px' }}>{file.name}</div>
+        <div className="text-xs mt-0.5" style={{ color: C.dgray }}>{(file.size/1024).toFixed(0)} KB · {ext || 'CSV'}</div>
       </div>
     </div>
-    <button onClick={onRemove} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-50" style={{ color: C.lgray }}>
-      <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+    <button onClick={onRemove} className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0 hover:bg-red-50" style={{ color: C.lgray }}>
+      <svg width="11" height="11" viewBox="0 0 14 14" fill="none">
         <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
       </svg>
     </button>
   </div>
 );
+
+/* ── Reusable drop zone ── */
+const DropZone = ({ title, hint, accept, multiple, files, onAdd, onRemove, required }) => {
+  const [dragging, setDragging] = useState(false);
+  const [error, setError]       = useState('');
+  const inputRef = useRef(null);
+
+  const exts = accept.split(',').map(s => s.trim());
+  const extLabel = exts.join(' / ').toUpperCase();
+
+  const processFiles = (incoming) => {
+    const valid = Array.from(incoming).filter(f => {
+      const name = f.name.toLowerCase();
+      return exts.some(ext => name.endsWith(ext));
+    });
+    const invalid = Array.from(incoming).length - valid.length;
+    setError(invalid > 0 ? `${invalid} Datei(en) ignoriert — nur ${extLabel} erlaubt.` : '');
+    if (!valid.length) return;
+    const toAdd = multiple ? valid : [valid[0]];
+    onAdd(toAdd);
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-bold" style={{ color: C.darkblue }}>{title}</span>
+        {required && <span className="text-xs px-1.5 py-0.5 rounded font-semibold" style={{ background:'#FEE2E2', color:'#DC2626' }}>Pflicht</span>}
+      </div>
+      {hint && <p className="text-xs" style={{ color: C.dgray }}>{hint}</p>}
+
+      <div
+        onDrop={e => { e.preventDefault(); setDragging(false); processFiles(e.dataTransfer.files); }}
+        onDragOver={e => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
+        onClick={() => inputRef.current?.click()}
+        className="rounded-xl border-2 border-dashed px-6 py-5 flex items-center gap-4 cursor-pointer transition-all"
+        style={{ borderColor: dragging ? C.blue : files.length > 0 ? '#A5B4FC' : '#E5E7EB', background: dragging ? '#EEF0FF' : files.length > 0 ? '#F8F9FF' : '#FAFAFA' }}>
+        <input ref={inputRef} type="file" accept={accept} multiple={multiple} className="hidden"
+          onChange={e => processFiles(e.target.files)}/>
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 transition-all"
+          style={{ background: dragging ? C.blue : '#EEF0FF' }}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M12 15V3M12 3l-4 4M12 3l4 4" stroke={dragging ? '#fff' : C.blue} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M3 15v4a2 2 0 002 2h14a2 2 0 002-2v-4" stroke={dragging ? '#fff' : C.blue} strokeWidth="2" strokeLinecap="round"/>
+          </svg>
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold" style={{ color: dragging ? C.blue : C.darkblue }}>
+            {dragging ? 'Loslassen …' : files.length > 0 ? `${files.length} Datei${files.length > 1 ? 'en' : ''} hochgeladen` : 'Dateien hier ablegen oder klicken'}
+          </p>
+          <p className="text-xs mt-0.5" style={{ color: C.lgray }}>{extLabel} · {multiple ? 'Mehrere möglich' : 'Eine Datei'}</p>
+        </div>
+        {files.length > 0 && (
+          <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0"
+            style={{ background: '#D1FAE5' }}>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M2 6l3 3 5-5" stroke="#065F46" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </div>
+        )}
+      </div>
+
+      {error && (
+        <p className="text-xs" style={{ color:'#DC2626' }}>{error}</p>
+      )}
+
+      {files.length > 0 && (
+        <div className="flex flex-col gap-1.5">
+          {files.map(f => (
+            <FileRow key={f.name} file={f} ext={exts[0].replace('.','').toUpperCase()}
+              onRemove={() => onRemove(f.name)}/>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
 
 /* ══════════════════════════════════════════
    MAIN APP
@@ -235,12 +312,10 @@ const App = () => {
   const [pvLastgaenge, setPvLastgaenge] = useState('Nein');
   const [pvAnlagen, setPvAnlagen]   = useState([{ leistung:'', standort:'' }]);
 
-  const [files, setFiles]           = useState([]);
-  const [dragging, setDragging]     = useState(false);
-  const [error, setError]           = useState('');
-  const dropRef      = useRef(null);
-  const inputRef     = useRef(null);
-  const companyRef   = useRef(null);
+  const [verbrauchsFiles, setVerbrauchsFiles] = useState([]);
+  const [lieferstelleFiles, setLieferstelleFiles] = useState([]);
+  const [erzeugerFiles, setErzeugerFiles]     = useState([]);
+  const companyRef = useRef(null);
 
   /* focus company field only on first render */
   useEffect(() => { companyRef.current?.focus(); }, []);
@@ -263,21 +338,8 @@ const App = () => {
     setPvAnlagen(prev => prev.map((a, i) => i === idx ? { ...a, [field]: val } : a));
   };
 
-  const addFiles = useCallback((incoming) => {
-    const csvs = Array.from(incoming).filter(f => f.name.toLowerCase().endsWith('.csv') || f.type === 'text/csv');
-    const invalid = Array.from(incoming).length - csvs.length;
-    setError(invalid > 0 ? `${invalid} Datei(en) ignoriert — nur CSV erlaubt.` : '');
-    if (!csvs.length) return;
-    setFiles(prev => { const names = new Set(prev.map(f => f.name)); return [...prev, ...csvs.filter(f => !names.has(f.name))]; });
-  }, []);
-
-  const onDrop      = useCallback((e) => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files); }, [addFiles]);
-  const onDragOver  = (e) => { e.preventDefault(); setDragging(true); };
-  const onDragLeave = () => setDragging(false);
-  const removeFile  = (name) => setFiles(prev => prev.filter(f => f.name !== name));
-
   const canStep1 = company.trim().length >= 2 && adresse.trim().length >= 2;
-  const canStep2 = files.length > 0;
+  const canStep2 = verbrauchsFiles.length > 0 && lieferstelleFiles.length > 0;
 
   /* ── Step 1 ── */
   const Step1 = () => (
@@ -424,66 +486,63 @@ const App = () => {
 
   /* ── Step 2: File upload ── */
   const Step2 = () => (
-    <div className="flex flex-col gap-6 max-w-2xl mx-auto w-full">
+    <div className="flex flex-col gap-7 max-w-2xl mx-auto w-full">
       <div>
         <div className="flex items-center gap-2 mb-1">
           <h2 className="text-2xl font-bold" style={{ color: C.darkblue }}>Lastgänge hochladen</h2>
           <span className="text-sm px-3 py-1 rounded-full font-semibold" style={{ background:'#EEF0FF', color: C.blue }}>{company}</span>
         </div>
-        <p className="text-sm" style={{ color: C.dgray }}>CSV-Dateien per Drag & Drop oder Klick hinzufügen.</p>
+        <p className="text-sm" style={{ color: C.dgray }}>Bitte lade alle erforderlichen Dateien hoch.</p>
       </div>
 
-      <div ref={dropRef} onDrop={onDrop} onDragOver={onDragOver} onDragLeave={onDragLeave}
-        onClick={() => inputRef.current?.click()}
-        className={`relative rounded-2xl border-2 border-dashed p-10 flex flex-col items-center justify-center gap-3 cursor-pointer transition-all ${dragging ? 'drop-active' : ''}`}
-        style={{ borderColor: dragging ? C.blue : '#D1D5DB', background: dragging ? '#EEF0FF' : '#FAFAFA', minHeight:'200px' }}>
-        <input ref={inputRef} type="file" accept=".csv" multiple className="hidden" onChange={e => addFiles(e.target.files)}/>
-        <div className="w-14 h-14 rounded-2xl flex items-center justify-center transition-all" style={{ background: dragging ? C.blue : '#EEF0FF' }}>
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
-            <path d="M12 15V3M12 3l-4 4M12 3l4 4" stroke={dragging ? '#fff' : C.blue} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            <path d="M3 15v4a2 2 0 002 2h14a2 2 0 002-2v-4" stroke={dragging ? '#fff' : C.blue} strokeWidth="2" strokeLinecap="round"/>
-          </svg>
-        </div>
-        <div className="text-center">
-          <p className="font-semibold text-sm" style={{ color: dragging ? C.blue : C.darkblue }}>
-            {dragging ? 'Dateien loslassen …' : 'CSV-Dateien hier ablegen'}
-          </p>
-          <p className="text-xs mt-0.5" style={{ color: C.dgray }}>oder klicken zum Auswählen</p>
-        </div>
-        {!dragging && (
-          <div className="flex items-center gap-2 mt-1">
-            <span className="text-xs px-2.5 py-1 rounded-full font-medium" style={{ background:'#F3F4F6', color: C.dgray }}>.csv</span>
-            <span className="text-xs" style={{ color: C.lgray }}>Beliebige Dateigröße</span>
-          </div>
-        )}
-      </div>
+      {/* 1 — Verbrauchslastgänge */}
+      <DropZone
+        title="Verbrauchslastgänge"
+        hint="Diese können aus dem Cockpit heruntergeladen werden."
+        accept=".csv"
+        multiple={true}
+        required={true}
+        files={verbrauchsFiles}
+        onAdd={incoming => setVerbrauchsFiles(prev => {
+          const names = new Set(prev.map(f => f.name));
+          return [...prev, ...incoming.filter(f => !names.has(f.name))];
+        })}
+        onRemove={name => setVerbrauchsFiles(prev => prev.filter(f => f.name !== name))}
+      />
 
-      {error && (
-        <div className="fade-in flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm" style={{ background:'#FEF2F2', color:'#DC2626' }}>
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <circle cx="7" cy="7" r="6" stroke="#DC2626" strokeWidth="1.5"/>
-            <line x1="7" y1="4" x2="7" y2="8" stroke="#DC2626" strokeWidth="1.5" strokeLinecap="round"/>
-            <circle cx="7" cy="10.5" r="0.75" fill="#DC2626"/>
-          </svg>
-          {error}
-        </div>
-      )}
+      <div className="border-t" style={{ borderColor:'#F0F0F0' }}/>
 
-      {files.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.dgray }}>
-              {files.length} {files.length === 1 ? 'Datei' : 'Dateien'} bereit
-            </span>
-            <button onClick={() => setFiles([])} className="text-xs" style={{ color: C.lgray }}>Alle entfernen</button>
-          </div>
-          <div className="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1">
-            {files.map(f => <FileRow key={f.name} file={f} onRemove={() => removeFile(f.name)}/>)}
-          </div>
-        </div>
-      )}
+      {/* 2 — Lieferstellenübersicht */}
+      <DropZone
+        title="Lieferstellenübersicht"
+        hint="Soll alle Lieferstellen (RLM und SLP) inkludieren, welche in den Vertrag aufgenommen werden sollen."
+        accept=".xlsx,.xls"
+        multiple={false}
+        required={true}
+        files={lieferstelleFiles}
+        onAdd={incoming => setLieferstelleFiles([incoming[0]])}
+        onRemove={() => setLieferstelleFiles([])}
+      />
 
-      <div className="flex items-center gap-3">
+      {/* 3 — Eigenerzeugungslastgänge (nur wenn pvLastgaenge = Ja) */}
+      {!isGas && isPvVorhanden && pvLastgaenge === 'Ja' && (<>
+        <div className="border-t" style={{ borderColor:'#F0F0F0' }}/>
+        <DropZone
+          title="Eigenerzeugungslastgänge"
+          hint={`Lastgänge der ${pvAnzahl} PV-Anlage${pvAnzahl > 1 ? 'n' : ''} — eine Datei pro Anlage empfohlen.`}
+          accept=".csv"
+          multiple={true}
+          required={false}
+          files={erzeugerFiles}
+          onAdd={incoming => setErzeugerFiles(prev => {
+            const names = new Set(prev.map(f => f.name));
+            return [...prev, ...incoming.filter(f => !names.has(f.name))];
+          })}
+          onRemove={name => setErzeugerFiles(prev => prev.filter(f => f.name !== name))}
+        />
+      </>)}
+
+      <div className="flex items-center gap-3 pt-1">
         <button onClick={() => setStep(1)} className="px-5 py-2.5 rounded-xl text-sm font-semibold border"
           style={{ borderColor:'#E5E7EB', color: C.dgray, background:'#fff' }}>← Zurück</button>
         <button onClick={() => setStep(3)} disabled={!canStep2}
@@ -500,7 +559,8 @@ const App = () => {
 
   /* ── Step 3: Summary ── */
   const Step3 = () => {
-    const totalKb = files.reduce((a, f) => a + f.size, 0) / 1024;
+    const allFiles = [...verbrauchsFiles, ...lieferstelleFiles, ...erzeugerFiles];
+    const totalKb = allFiles.reduce((a, f) => a + f.size, 0) / 1024;
     const tags = [
       lieferjahre.join(', '),
       energietraeger,
@@ -550,22 +610,27 @@ const App = () => {
           )}
 
           {/* Files */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.dgray }}>
-                Lastgänge ({files.length})
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.dgray }}>Dateien</div>
+              <div className="text-xs" style={{ color: C.dgray }}>{totalKb.toFixed(0)} KB gesamt</div>
+            </div>
+            {[
+              { label:'Verbrauchslastgänge', list: verbrauchsFiles },
+              { label:'Lieferstellenübersicht', list: lieferstelleFiles },
+              ...(erzeugerFiles.length > 0 ? [{ label:'Eigenerzeugung', list: erzeugerFiles }] : []),
+            ].map(({ label, list }) => list.length > 0 && (
+              <div key={label}>
+                <div className="text-xs font-semibold mb-1" style={{ color: C.dgray }}>{label}</div>
+                {list.map(f => (
+                  <div key={f.name} className="flex items-center justify-between text-sm py-0.5">
+                    <span className="truncate" style={{ color: C.darkblue, maxWidth:'280px' }}>{f.name}</span>
+                    <span className="flex-shrink-0 ml-2" style={{ color: C.dgray }}>{(f.size/1024).toFixed(0)} KB</span>
+                  </div>
+                ))}
               </div>
-              <div className="text-xs" style={{ color: C.dgray }}>{totalKb.toFixed(0)} KB</div>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              {files.map(f => (
-                <div key={f.name} className="flex items-center justify-between text-sm">
-                  <span className="font-medium truncate" style={{ color: C.darkblue, maxWidth:'280px' }}>{f.name}</span>
-                  <span style={{ color: C.dgray }}>{(f.size/1024).toFixed(0)} KB</span>
-                </div>
-              ))}
-            </div>
-            <button onClick={() => setStep(2)} className="text-xs font-medium mt-2" style={{ color: C.blue }}>
+            ))}
+            <button onClick={() => setStep(2)} className="text-xs font-medium" style={{ color: C.blue }}>
               + Dateien anpassen
             </button>
           </div>
