@@ -5,6 +5,9 @@ const FOLDER_ID   = '1gwxFgEb3D7WIOOQrVArM50o04V9oQSaC';
 const SHEET_NAME  = '0) Sales Enablement';
 
 function getAuth() {
+  if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
+    throw new Error('GOOGLE_SERVICE_ACCOUNT_JSON ist nicht in den Vercel Environment Variables gesetzt.');
+  }
   const key = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
   return new google.auth.GoogleAuth({
     credentials: key,
