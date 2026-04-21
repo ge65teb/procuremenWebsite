@@ -14,10 +14,16 @@
     * { font-family: 'Inter', sans-serif; box-sizing: border-box; }
     body { background: #F5F6FA; margin: 0; min-height: 100vh; }
     .drop-active { border-color: #1A2FEE !important; background: #EEF0FF !important; }
-    @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
-    .fade-in { animation: fadeIn 0.25s ease forwards; }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .spinner { animation: spin 0.8s linear infinite; }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+    .fade-in { animation: fadeIn 0.22s ease forwards; }
+    .tooltip-wrap { position: relative; display: inline-flex; align-items: center; }
+    .tooltip-box {
+      display: none; position: absolute; bottom: calc(100% + 6px); left: 50%;
+      transform: translateX(-50%); background: #1e293b; color: #fff;
+      font-size: 11px; font-weight: 500; padding: 5px 10px; border-radius: 8px;
+      white-space: nowrap; pointer-events: none; z-index: 50;
+    }
+    .tooltip-wrap:hover .tooltip-box { display: block; }
   </style>
 </head>
 <body>
@@ -35,16 +41,13 @@ const C = {
   bg:       '#F5F6FA',
 };
 
-/* ── Wordmark ── */
+/* ── Real ecoplanet logo ── */
 const Logo = () => (
-  <div className="flex items-center gap-2">
-    <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
-      <rect width="32" height="32" rx="8" fill={C.blue}/>
-      <path d="M8 16 C8 11 12 8 16 8 C20 8 24 11 24 16" stroke={C.yellow} strokeWidth="2.5" strokeLinecap="round" fill="none"/>
-      <circle cx="16" cy="20" r="4" fill={C.yellow}/>
-    </svg>
-    <span className="font-bold text-lg tracking-tight" style={{ color: C.darkblue }}>ecoplanet</span>
-    <span className="text-xs font-medium px-2 py-0.5 rounded-full ml-1" style={{ background: '#EEF0FF', color: C.blue }}>CSM Portal</span>
+  <div className="flex items-center gap-3">
+    <img src="logo.svg" alt="ecoplanet" style={{ height: '28px' }} onError={e => { e.target.style.display='none'; }}/>
+    <span className="text-xs font-semibold px-2.5 py-1 rounded-full" style={{ background: '#EEF0FF', color: C.blue }}>
+      CSM Portal
+    </span>
   </div>
 );
 
@@ -52,7 +55,7 @@ const Logo = () => (
 const Steps = ({ current }) => {
   const steps = ['Kunde', 'Lastgänge', 'Übersicht'];
   return (
-    <div className="flex items-center gap-0">
+    <div className="flex items-center">
       {steps.map((s, i) => {
         const idx = i + 1;
         const done = idx < current;
@@ -61,17 +64,12 @@ const Steps = ({ current }) => {
           <React.Fragment key={s}>
             <div className="flex items-center gap-2">
               <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-all"
-                style={{
-                  background: done ? C.yellow : active ? C.blue : '#E5E7EB',
-                  color: done ? C.darkblue : active ? '#fff' : C.lgray,
-                }}>
+                style={{ background: done ? C.yellow : active ? C.blue : '#E5E7EB', color: done ? C.darkblue : active ? '#fff' : C.lgray }}>
                 {done ? '✓' : idx}
               </div>
               <span className="text-sm font-medium" style={{ color: active ? C.darkblue : C.lgray }}>{s}</span>
             </div>
-            {i < steps.length - 1 && (
-              <div className="w-10 h-px mx-2 transition-all" style={{ background: done ? C.blue : '#E5E7EB' }}/>
-            )}
+            {i < steps.length - 1 && <div className="w-10 h-px mx-2" style={{ background: done ? C.blue : '#E5E7EB' }}/>}
           </React.Fragment>
         );
       })}
@@ -79,52 +77,45 @@ const Steps = ({ current }) => {
   );
 };
 
-/* ── File row ── */
-const FileRow = ({ file, onRemove }) => {
-  const kb = (file.size / 1024).toFixed(0);
-  return (
-    <div className="fade-in flex items-center justify-between px-4 py-3 rounded-xl border transition-all"
-      style={{ background: '#fff', borderColor: '#E5E7EB' }}>
-      <div className="flex items-center gap-3">
-        <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-          style={{ background: '#EEF0FF' }}>
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-            <path d="M3 2h7l3 3v9a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z" stroke={C.blue} strokeWidth="1.3" fill="none"/>
-            <path d="M10 2v3h3" stroke={C.blue} strokeWidth="1.3"/>
-            <line x1="5" y1="8" x2="11" y2="8" stroke={C.blue} strokeWidth="1.2" strokeLinecap="round"/>
-            <line x1="5" y1="11" x2="9" y2="11" stroke={C.blue} strokeWidth="1.2" strokeLinecap="round"/>
-          </svg>
-        </div>
-        <div>
-          <div className="text-sm font-semibold leading-tight" style={{ color: C.darkblue }}>{file.name}</div>
-          <div className="text-xs mt-0.5" style={{ color: C.dgray }}>{kb} KB · CSV</div>
-        </div>
-      </div>
-      <button onClick={onRemove}
-        className="w-7 h-7 rounded-lg flex items-center justify-center transition-colors hover:bg-red-50"
-        style={{ color: C.lgray }}>
-        <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
-          <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
-        </svg>
-      </button>
-    </div>
-  );
-};
-
-/* ── Selection button group ── */
-const SelectGroup = ({ label, options, value, onChange, disabled = false }) => (
+/* ── Text input field ── */
+const Field = ({ label, value, onChange, placeholder, autoFocus }) => (
   <div>
-    <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: disabled ? C.lgray : C.dgray }}>
+    <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: C.dgray }}>
       {label}
     </label>
+    <input
+      autoFocus={autoFocus}
+      type="text"
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      placeholder={placeholder}
+      className="w-full px-4 py-3 rounded-xl border-2 text-sm font-medium outline-none transition-all"
+      style={{ borderColor: value.length > 0 ? C.blue : '#E5E7EB', color: C.darkblue, background: '#fff' }}
+    />
+  </div>
+);
+
+/* ── Single-select pill group ── */
+const SelectGroup = ({ label, options, value, onChange, disabled = false, tooltip }) => (
+  <div>
+    <div className="flex items-center gap-1.5 mb-1.5">
+      <label className="text-xs font-semibold uppercase tracking-wide" style={{ color: disabled ? C.lgray : C.dgray }}>
+        {label}
+      </label>
+      {tooltip && (
+        <div className="tooltip-wrap">
+          <div style={{ width:15, height:15, borderRadius:'50%', background:'#E5E7EB', display:'flex', alignItems:'center', justifyContent:'center', cursor:'default' }}>
+            <span style={{ fontSize:10, fontWeight:700, color:C.dgray }}>i</span>
+          </div>
+          <div className="tooltip-box">{tooltip}</div>
+        </div>
+      )}
+    </div>
     <div className="flex gap-2 flex-wrap">
       {options.map(opt => {
         const active = value === opt.value;
         return (
-          <button
-            key={opt.value}
-            disabled={disabled}
-            onClick={() => !disabled && onChange(opt.value)}
+          <button key={opt.value} disabled={disabled} onClick={() => !disabled && onChange(opt.value)}
             className="px-4 py-2 rounded-xl text-sm font-semibold border-2 transition-all"
             style={{
               borderColor: disabled ? '#E5E7EB' : active ? C.blue : '#E5E7EB',
@@ -141,105 +132,175 @@ const SelectGroup = ({ label, options, value, onChange, disabled = false }) => (
   </div>
 );
 
-/* ── Main App ── */
+/* ── Multi-select pill group ── */
+const MultiSelectGroup = ({ label, options, value, onChange }) => {
+  const toggle = (v) => {
+    if (value.includes(v)) {
+      if (value.length > 1) onChange(value.filter(x => x !== v));
+    } else {
+      onChange([...value, v]);
+    }
+  };
+  return (
+    <div>
+      <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: C.dgray }}>
+        {label} <span className="normal-case font-normal ml-1" style={{ color: C.lgray }}>(Mehrfachauswahl)</span>
+      </label>
+      <div className="flex gap-2 flex-wrap">
+        {options.map(opt => {
+          const active = value.includes(opt.value);
+          return (
+            <button key={opt.value} onClick={() => toggle(opt.value)}
+              className="px-4 py-2 rounded-xl text-sm font-semibold border-2 transition-all"
+              style={{
+                borderColor: active ? C.blue : '#E5E7EB',
+                background: active ? C.blue : '#fff',
+                color: active ? '#fff' : C.darkblue,
+              }}>
+              {opt.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+/* ── Number input ── */
+const NumberField = ({ label, value, onChange, min = 1, max = 20 }) => (
+  <div>
+    <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: C.dgray }}>{label}</label>
+    <input
+      type="number" min={min} max={max} value={value}
+      onChange={e => onChange(Math.max(min, Math.min(max, parseInt(e.target.value) || min)))}
+      className="w-full px-4 py-3 rounded-xl border-2 text-sm font-medium outline-none transition-all"
+      style={{ borderColor: C.blue, color: C.darkblue, background: '#fff' }}
+    />
+  </div>
+);
+
+/* ── File row ── */
+const FileRow = ({ file, onRemove }) => (
+  <div className="fade-in flex items-center justify-between px-4 py-3 rounded-xl border" style={{ background:'#fff', borderColor:'#E5E7EB' }}>
+    <div className="flex items-center gap-3">
+      <div className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background:'#EEF0FF' }}>
+        <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+          <path d="M3 2h7l3 3v9a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z" stroke={C.blue} strokeWidth="1.3" fill="none"/>
+          <path d="M10 2v3h3" stroke={C.blue} strokeWidth="1.3"/>
+          <line x1="5" y1="8" x2="11" y2="8" stroke={C.blue} strokeWidth="1.2" strokeLinecap="round"/>
+          <line x1="5" y1="11" x2="9" y2="11" stroke={C.blue} strokeWidth="1.2" strokeLinecap="round"/>
+        </svg>
+      </div>
+      <div>
+        <div className="text-sm font-semibold leading-tight" style={{ color: C.darkblue }}>{file.name}</div>
+        <div className="text-xs mt-0.5" style={{ color: C.dgray }}>{(file.size/1024).toFixed(0)} KB · CSV</div>
+      </div>
+    </div>
+    <button onClick={onRemove} className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-red-50" style={{ color: C.lgray }}>
+      <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+        <path d="M2 2l10 10M12 2L2 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+      </svg>
+    </button>
+  </div>
+);
+
+/* ══════════════════════════════════════════
+   MAIN APP
+══════════════════════════════════════════ */
 const App = () => {
-  const [step, setStep] = useState(1);
-  const [company, setCompany] = useState('');
-  const [lieferjahr, setLieferjahr] = useState('2027');
+  const [step, setStep]             = useState(1);
+  const [company, setCompany]       = useState('');
+  const [adresse, setAdresse]       = useState('');
+  const [lieferjahre, setLieferjahre] = useState(['2027']);
   const [energietraeger, setEnergietraeger] = useState('Strom');
+  const [bonitaet, setBonitaet]     = useState('unbekannt');
   const [gruenstrom, setGruenstrom] = useState('Nein');
-  const [bonitaet, setBonitaet] = useState('unbekannt');
-  const [files, setFiles] = useState([]);
-  const [dragging, setDragging] = useState(false);
-  const [error, setError] = useState('');
-  const dropRef = useRef(null);
+  const [ppa, setPpa]               = useState('Nein');
+  const [pvStatus, setPvStatus]     = useState('nicht vorhanden');
+  const [pvAnzahl, setPvAnzahl]     = useState(1);
+  const [pvLastgaenge, setPvLastgaenge] = useState('Nein');
+  const [pvAnlagen, setPvAnlagen]   = useState([{ leistung:'', standort:'' }]);
+
+  const [files, setFiles]           = useState([]);
+  const [dragging, setDragging]     = useState(false);
+  const [error, setError]           = useState('');
+  const dropRef  = useRef(null);
   const inputRef = useRef(null);
 
-  const isGas = energietraeger === 'Gas';
+  const isGas      = energietraeger === 'Gas';
+  const isPvVorhanden = pvStatus === 'vorhanden';
+  const ppaDisabled = bonitaet === 'schlecht' || isGas;
+
+  /* sync PV-Anlagen array when count changes */
+  const updatePvAnzahl = (n) => {
+    setPvAnzahl(n);
+    setPvAnlagen(prev => {
+      const next = [...prev];
+      while (next.length < n) next.push({ leistung:'', standort:'' });
+      return next.slice(0, n);
+    });
+  };
+
+  const updatePvAnlage = (idx, field, val) => {
+    setPvAnlagen(prev => prev.map((a, i) => i === idx ? { ...a, [field]: val } : a));
+  };
 
   const addFiles = useCallback((incoming) => {
-    const csvs = Array.from(incoming).filter(f =>
-      f.name.toLowerCase().endsWith('.csv') || f.type === 'text/csv'
-    );
+    const csvs = Array.from(incoming).filter(f => f.name.toLowerCase().endsWith('.csv') || f.type === 'text/csv');
     const invalid = Array.from(incoming).length - csvs.length;
-    if (invalid > 0) setError(`${invalid} Datei(en) ignoriert — nur CSV erlaubt.`);
-    else setError('');
-    if (csvs.length === 0) return;
-    setFiles(prev => {
-      const names = new Set(prev.map(f => f.name));
-      return [...prev, ...csvs.filter(f => !names.has(f.name))];
-    });
+    setError(invalid > 0 ? `${invalid} Datei(en) ignoriert — nur CSV erlaubt.` : '');
+    if (!csvs.length) return;
+    setFiles(prev => { const names = new Set(prev.map(f => f.name)); return [...prev, ...csvs.filter(f => !names.has(f.name))]; });
   }, []);
 
-  const onDrop = useCallback((e) => {
-    e.preventDefault();
-    setDragging(false);
-    addFiles(e.dataTransfer.files);
-  }, [addFiles]);
-
-  const onDragOver = (e) => { e.preventDefault(); setDragging(true); };
+  const onDrop      = useCallback((e) => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files); }, [addFiles]);
+  const onDragOver  = (e) => { e.preventDefault(); setDragging(true); };
   const onDragLeave = () => setDragging(false);
+  const removeFile  = (name) => setFiles(prev => prev.filter(f => f.name !== name));
 
-  const removeFile = (name) => setFiles(prev => prev.filter(f => f.name !== name));
+  const canStep1 = company.trim().length >= 2 && adresse.trim().length >= 2;
+  const canStep2 = files.length > 0;
 
-  const canProceedStep1 = company.trim().length >= 2;
-  const canProceedStep2 = files.length > 0;
-
-  /* ── Step 1: Company + settings ── */
+  /* ── Step 1 ── */
   const Step1 = () => (
     <div className="fade-in flex flex-col gap-5 max-w-lg mx-auto">
       <div>
         <h2 className="text-2xl font-bold mb-1" style={{ color: C.darkblue }}>Kunde anlegen</h2>
-        <p className="text-sm" style={{ color: C.dgray }}>Gib den genauen Firmennamen ein und konfiguriere die Eckdaten.</p>
+        <p className="text-sm" style={{ color: C.dgray }}>Kundendaten und Beschaffungsparameter eintragen.</p>
       </div>
 
-      {/* Company name */}
-      <div>
-        <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: C.dgray }}>
-          Firmenname
-        </label>
-        <input
-          autoFocus
-          type="text"
-          value={company}
-          onChange={e => setCompany(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && canProceedStep1 && setStep(2)}
-          placeholder="z.B. NORMA Group SE"
-          className="w-full px-4 py-3 rounded-xl border-2 text-base font-medium outline-none transition-all"
-          style={{
-            borderColor: company.length > 0 ? C.blue : '#E5E7EB',
-            color: C.darkblue,
-            background: '#fff',
-          }}
-        />
-        {company.trim().length > 0 && company.trim().length < 2 && (
-          <p className="text-xs mt-1.5" style={{ color: '#EF4444' }}>Mindestens 2 Zeichen erforderlich.</p>
-        )}
-      </div>
+      {/* Company + address */}
+      <Field label="Firmenname" value={company} onChange={setCompany} placeholder="z.B. NORMA Group SE" autoFocus/>
+      <Field label="Adresse" value={adresse} onChange={setAdresse} placeholder="z.B. Ingolstädter Str. 1, 90451 Nürnberg"/>
 
-      {/* Divider */}
       <div className="border-t" style={{ borderColor: '#F0F0F0' }}/>
 
-      {/* Lieferjahr */}
-      <SelectGroup
+      {/* Lieferjahr — multiselect */}
+      <MultiSelectGroup
         label="Lieferjahr"
-        value={lieferjahr}
-        onChange={setLieferjahr}
-        options={[
-          { value:'2027', label:'2027' },
-          { value:'2028', label:'2028' },
-          { value:'2029', label:'2029' },
-        ]}
+        value={lieferjahre}
+        onChange={setLieferjahre}
+        options={[{ value:'2027', label:'2027' }, { value:'2028', label:'2028' }, { value:'2029', label:'2029' }]}
       />
 
       {/* Energieträger */}
       <SelectGroup
         label="Energieträger"
         value={energietraeger}
-        onChange={v => { setEnergietraeger(v); if (v === 'Gas') setGruenstrom('Nein'); }}
+        onChange={v => { setEnergietraeger(v); if (v === 'Gas') { setGruenstrom('Nein'); setPpa('Nein'); } }}
+        options={[{ value:'Strom', label:'⚡ Strom' }, { value:'Gas', label:'🔥 Gas' }]}
+      />
+
+      {/* Bonität — above Grünstrom */}
+      <SelectGroup
+        label="Bonität"
+        value={bonitaet}
+        onChange={v => { setBonitaet(v); if (v === 'schlecht') setPpa('Nein'); }}
+        tooltip="Bitte North Data checken"
         options={[
-          { value:'Strom', label:'⚡ Strom' },
-          { value:'Gas',   label:'🔥 Gas' },
+          { value:'gut',       label:'Gut' },
+          { value:'schlecht',  label:'Schlecht' },
+          { value:'unbekannt', label:'Unbekannt' },
         ]}
       />
 
@@ -250,39 +311,95 @@ const App = () => {
           value={gruenstrom}
           onChange={setGruenstrom}
           disabled={isGas}
-          options={[
-            { value:'Ja',   label:'Ja' },
-            { value:'Nein', label:'Nein' },
-          ]}
+          options={[{ value:'Ja', label:'Ja' }, { value:'Nein', label:'Nein' }]}
         />
-        {isGas && (
-          <p className="text-xs mt-1.5" style={{ color: C.lgray }}>
-            Nicht verfügbar bei Energieträger Gas.
-          </p>
-        )}
+        {isGas && <p className="text-xs mt-1.5" style={{ color: C.lgray }}>Nicht verfügbar bei Energieträger Gas.</p>}
       </div>
 
-      {/* Bonität */}
+      {/* PPA — hidden/disabled when Bonität = schlecht or Gas */}
+      {!ppaDisabled && (
+        <div className="fade-in">
+          <SelectGroup
+            label="PPA"
+            value={ppa}
+            onChange={setPpa}
+            options={[{ value:'Ja', label:'Ja' }, { value:'Nein', label:'Nein' }]}
+          />
+        </div>
+      )}
+      {ppaDisabled && bonitaet === 'schlecht' && (
+        <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs" style={{ background:'#FEF3C7', color:'#92400E' }}>
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+            <circle cx="7" cy="7" r="6" stroke="#92400E" strokeWidth="1.4"/>
+            <line x1="7" y1="4" x2="7" y2="8" stroke="#92400E" strokeWidth="1.4" strokeLinecap="round"/>
+            <circle cx="7" cy="10.5" r="0.7" fill="#92400E"/>
+          </svg>
+          PPA nicht verfügbar — Bonität des Kunden ist schlecht.
+        </div>
+      )}
+
+      <div className="border-t" style={{ borderColor: '#F0F0F0' }}/>
+
+      {/* PV-Eigenerzeugung */}
       <SelectGroup
-        label="Bonität"
-        value={bonitaet}
-        onChange={setBonitaet}
-        options={[
-          { value:'gut',       label:'Gut' },
-          { value:'schlecht',  label:'Schlecht' },
-          { value:'unbekannt', label:'Unbekannt' },
-        ]}
+        label="PV-Eigenerzeugung"
+        value={pvStatus}
+        onChange={v => { setPvStatus(v); if (v === 'nicht vorhanden') { setPvAnzahl(1); setPvAnlagen([{ leistung:'', standort:'' }]); } }}
+        options={[{ value:'vorhanden', label:'Vorhanden' }, { value:'nicht vorhanden', label:'Nicht vorhanden' }]}
       />
 
-      <button
-        onClick={() => setStep(2)}
-        disabled={!canProceedStep1}
+      {isPvVorhanden && (
+        <div className="fade-in flex flex-col gap-4 pl-4 border-l-2" style={{ borderColor: C.lblue }}>
+          {/* Anzahl + Lastgänge side by side */}
+          <div className="grid grid-cols-2 gap-4">
+            <NumberField label="Anzahl PV-Anlagen" value={pvAnzahl} onChange={updatePvAnzahl} min={1} max={20}/>
+            <SelectGroup
+              label="Lastgänge vorhanden"
+              value={pvLastgaenge}
+              onChange={setPvLastgaenge}
+              options={[{ value:'Ja', label:'Ja' }, { value:'Nein', label:'Nein' }]}
+            />
+          </div>
+
+          {/* Per-PV-plant fields */}
+          <div className="flex flex-col gap-3">
+            <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.dgray }}>
+              Anlagen-Details
+            </div>
+            {pvAnlagen.map((anlage, idx) => (
+              <div key={idx} className="fade-in rounded-xl p-4 border" style={{ background:'#FAFAFA', borderColor:'#E5E7EB' }}>
+                <div className="text-xs font-bold mb-3" style={{ color: C.blue }}>Anlage {idx + 1}</div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: C.dgray }}>Leistung (kWp)</label>
+                    <input
+                      type="number" min="0" value={anlage.leistung}
+                      onChange={e => updatePvAnlage(idx, 'leistung', e.target.value)}
+                      placeholder="z.B. 250"
+                      className="w-full px-3 py-2.5 rounded-xl border-2 text-sm font-medium outline-none transition-all"
+                      style={{ borderColor: anlage.leistung ? C.blue : '#E5E7EB', color: C.darkblue, background:'#fff' }}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: C.dgray }}>Standort</label>
+                    <input
+                      type="text" value={anlage.standort}
+                      onChange={e => updatePvAnlage(idx, 'standort', e.target.value)}
+                      placeholder="z.B. München"
+                      className="w-full px-3 py-2.5 rounded-xl border-2 text-sm font-medium outline-none transition-all"
+                      style={{ borderColor: anlage.standort ? C.blue : '#E5E7EB', color: C.darkblue, background:'#fff' }}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <button onClick={() => setStep(2)} disabled={!canStep1}
         className="flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm transition-all active:scale-95 mt-1"
-        style={{
-          background: canProceedStep1 ? C.blue : '#E5E7EB',
-          color: canProceedStep1 ? '#fff' : C.lgray,
-          cursor: canProceedStep1 ? 'pointer' : 'not-allowed',
-        }}>
+        style={{ background: canStep1 ? C.blue : '#E5E7EB', color: canStep1 ? '#fff' : C.lgray, cursor: canStep1 ? 'pointer' : 'not-allowed' }}>
         Weiter
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
           <path d="M3 7h8M7 3l4 4-4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
@@ -297,36 +414,17 @@ const App = () => {
       <div>
         <div className="flex items-center gap-2 mb-1">
           <h2 className="text-2xl font-bold" style={{ color: C.darkblue }}>Lastgänge hochladen</h2>
-          <span className="text-sm px-3 py-1 rounded-full font-semibold" style={{ background: '#EEF0FF', color: C.blue }}>
-            {company}
-          </span>
+          <span className="text-sm px-3 py-1 rounded-full font-semibold" style={{ background:'#EEF0FF', color: C.blue }}>{company}</span>
         </div>
-        <p className="text-sm" style={{ color: C.dgray }}>CSV-Dateien per Drag & Drop oder Klick hinzufügen. Mehrere Dateien gleichzeitig möglich.</p>
+        <p className="text-sm" style={{ color: C.dgray }}>CSV-Dateien per Drag & Drop oder Klick hinzufügen.</p>
       </div>
 
-      {/* Drop zone */}
-      <div
-        ref={dropRef}
-        onDrop={onDrop}
-        onDragOver={onDragOver}
-        onDragLeave={onDragLeave}
+      <div ref={dropRef} onDrop={onDrop} onDragOver={onDragOver} onDragLeave={onDragLeave}
         onClick={() => inputRef.current?.click()}
         className={`relative rounded-2xl border-2 border-dashed p-10 flex flex-col items-center justify-center gap-3 cursor-pointer transition-all ${dragging ? 'drop-active' : ''}`}
-        style={{
-          borderColor: dragging ? C.blue : '#D1D5DB',
-          background: dragging ? '#EEF0FF' : '#FAFAFA',
-          minHeight: '220px',
-        }}>
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".csv"
-          multiple
-          className="hidden"
-          onChange={e => addFiles(e.target.files)}
-        />
-        <div className="w-14 h-14 rounded-2xl flex items-center justify-center transition-all"
-          style={{ background: dragging ? C.blue : '#EEF0FF' }}>
+        style={{ borderColor: dragging ? C.blue : '#D1D5DB', background: dragging ? '#EEF0FF' : '#FAFAFA', minHeight:'200px' }}>
+        <input ref={inputRef} type="file" accept=".csv" multiple className="hidden" onChange={e => addFiles(e.target.files)}/>
+        <div className="w-14 h-14 rounded-2xl flex items-center justify-center transition-all" style={{ background: dragging ? C.blue : '#EEF0FF' }}>
           <svg width="26" height="26" viewBox="0 0 24 24" fill="none">
             <path d="M12 15V3M12 3l-4 4M12 3l4 4" stroke={dragging ? '#fff' : C.blue} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
             <path d="M3 15v4a2 2 0 002 2h14a2 2 0 002-2v-4" stroke={dragging ? '#fff' : C.blue} strokeWidth="2" strokeLinecap="round"/>
@@ -340,17 +438,14 @@ const App = () => {
         </div>
         {!dragging && (
           <div className="flex items-center gap-2 mt-1">
-            <span className="text-xs px-2.5 py-1 rounded-full font-medium" style={{ background: '#F3F4F6', color: C.dgray }}>
-              .csv
-            </span>
+            <span className="text-xs px-2.5 py-1 rounded-full font-medium" style={{ background:'#F3F4F6', color: C.dgray }}>.csv</span>
             <span className="text-xs" style={{ color: C.lgray }}>Beliebige Dateigröße</span>
           </div>
         )}
       </div>
 
       {error && (
-        <div className="fade-in flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm"
-          style={{ background: '#FEF2F2', color: '#DC2626' }}>
+        <div className="fade-in flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm" style={{ background:'#FEF2F2', color:'#DC2626' }}>
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
             <circle cx="7" cy="7" r="6" stroke="#DC2626" strokeWidth="1.5"/>
             <line x1="7" y1="4" x2="7" y2="8" stroke="#DC2626" strokeWidth="1.5" strokeLinecap="round"/>
@@ -360,40 +455,26 @@ const App = () => {
         </div>
       )}
 
-      {/* File list */}
       {files.length > 0 && (
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.dgray }}>
               {files.length} {files.length === 1 ? 'Datei' : 'Dateien'} bereit
             </span>
-            <button onClick={() => setFiles([])} className="text-xs" style={{ color: C.lgray }}>
-              Alle entfernen
-            </button>
+            <button onClick={() => setFiles([])} className="text-xs" style={{ color: C.lgray }}>Alle entfernen</button>
           </div>
           <div className="flex flex-col gap-2 max-h-64 overflow-y-auto pr-1">
-            {files.map(f => (
-              <FileRow key={f.name} file={f} onRemove={() => removeFile(f.name)}/>
-            ))}
+            {files.map(f => <FileRow key={f.name} file={f} onRemove={() => removeFile(f.name)}/>)}
           </div>
         </div>
       )}
 
       <div className="flex items-center gap-3">
-        <button onClick={() => setStep(1)}
-          className="px-5 py-2.5 rounded-xl text-sm font-semibold border transition-all"
-          style={{ borderColor: '#E5E7EB', color: C.dgray, background: '#fff' }}>
-          ← Zurück
-        </button>
-        <button
-          onClick={() => setStep(3)}
-          disabled={!canProceedStep2}
+        <button onClick={() => setStep(1)} className="px-5 py-2.5 rounded-xl text-sm font-semibold border"
+          style={{ borderColor:'#E5E7EB', color: C.dgray, background:'#fff' }}>← Zurück</button>
+        <button onClick={() => setStep(3)} disabled={!canStep2}
           className="flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-sm transition-all active:scale-95"
-          style={{
-            background: canProceedStep2 ? C.blue : '#E5E7EB',
-            color: canProceedStep2 ? '#fff' : C.lgray,
-            cursor: canProceedStep2 ? 'pointer' : 'not-allowed',
-          }}>
+          style={{ background: canStep2 ? C.blue : '#E5E7EB', color: canStep2 ? '#fff' : C.lgray, cursor: canStep2 ? 'pointer' : 'not-allowed' }}>
           Weiter
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
             <path d="M3 7h8M7 3l4 4-4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
@@ -406,6 +487,15 @@ const App = () => {
   /* ── Step 3: Summary ── */
   const Step3 = () => {
     const totalKb = files.reduce((a, f) => a + f.size, 0) / 1024;
+    const tags = [
+      lieferjahre.join(', '),
+      energietraeger,
+      !isGas && `Grünstrom: ${gruenstrom}`,
+      !ppaDisabled && `PPA: ${ppa}`,
+      `Bonität: ${bonitaet.charAt(0).toUpperCase() + bonitaet.slice(1)}`,
+      isPvVorhanden && `PV: ${pvAnzahl} Anlage${pvAnzahl > 1 ? 'n' : ''}`,
+    ].filter(Boolean);
+
     return (
       <div className="fade-in flex flex-col gap-6 max-w-lg mx-auto w-full">
         <div>
@@ -413,39 +503,47 @@ const App = () => {
           <p className="text-sm" style={{ color: C.dgray }}>Bitte prüfe alle Angaben vor dem Abschluss.</p>
         </div>
 
-        {/* Summary card */}
-        <div className="rounded-2xl border p-5 flex flex-col gap-4" style={{ borderColor: '#E5E7EB', background: '#fff' }}>
-          <div className="flex items-start justify-between pb-4 border-b" style={{ borderColor: '#F3F4F6' }}>
-            <div className="flex flex-col gap-2 flex-1">
+        <div className="rounded-2xl border p-5 flex flex-col gap-4" style={{ borderColor:'#E5E7EB', background:'#fff' }}>
+          {/* Customer block */}
+          <div className="flex items-start justify-between pb-4 border-b" style={{ borderColor:'#F3F4F6' }}>
+            <div className="flex flex-col gap-1.5 flex-1">
               <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.dgray }}>Kunde</div>
-              <div className="text-lg font-bold" style={{ color: C.darkblue }}>{company}</div>
-              <div className="flex flex-wrap gap-2 mt-1">
-                {[
-                  { label: lieferjahr },
-                  { label: energietraeger },
-                  { label: energietraeger === 'Strom' ? `Grünstrom: ${gruenstrom}` : null },
-                  { label: `Bonität: ${bonitaet.charAt(0).toUpperCase() + bonitaet.slice(1)}` },
-                ].filter(t => t.label).map(t => (
-                  <span key={t.label} className="text-xs font-semibold px-2.5 py-1 rounded-full"
-                    style={{ background: '#EEF0FF', color: C.blue }}>
-                    {t.label}
-                  </span>
+              <div className="text-lg font-bold leading-tight" style={{ color: C.darkblue }}>{company}</div>
+              <div className="text-xs" style={{ color: C.dgray }}>{adresse}</div>
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {tags.map(t => (
+                  <span key={t} className="text-xs font-semibold px-2.5 py-1 rounded-full" style={{ background:'#EEF0FF', color: C.blue }}>{t}</span>
                 ))}
               </div>
             </div>
-            <button onClick={() => setStep(1)} className="text-xs font-medium px-3 py-1 rounded-lg border transition-all flex-shrink-0 ml-4"
-              style={{ borderColor: '#E5E7EB', color: C.blue }}>
-              Ändern
-            </button>
+            <button onClick={() => setStep(1)} className="text-xs font-medium px-3 py-1 rounded-lg border flex-shrink-0 ml-4"
+              style={{ borderColor:'#E5E7EB', color: C.blue }}>Ändern</button>
           </div>
+
+          {/* PV details */}
+          {isPvVorhanden && (
+            <div className="pb-4 border-b" style={{ borderColor:'#F3F4F6' }}>
+              <div className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: C.dgray }}>PV-Anlagen</div>
+              <div className="flex flex-col gap-1.5">
+                {pvAnlagen.map((a, i) => (
+                  <div key={i} className="flex items-center justify-between text-sm">
+                    <span style={{ color: C.darkblue }}>Anlage {i+1}{a.standort ? ` — ${a.standort}` : ''}</span>
+                    <span style={{ color: C.dgray }}>{a.leistung ? `${a.leistung} kWp` : '—'}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Files */}
           <div>
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-2">
               <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: C.dgray }}>
                 Lastgänge ({files.length})
               </div>
-              <div className="text-xs" style={{ color: C.dgray }}>{totalKb.toFixed(0)} KB gesamt</div>
+              <div className="text-xs" style={{ color: C.dgray }}>{totalKb.toFixed(0)} KB</div>
             </div>
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-1.5">
               {files.map(f => (
                 <div key={f.name} className="flex items-center justify-between text-sm">
                   <span className="font-medium truncate" style={{ color: C.darkblue, maxWidth:'280px' }}>{f.name}</span>
@@ -459,38 +557,30 @@ const App = () => {
           </div>
         </div>
 
-        {/* CTA */}
-        <button
-          onClick={() => alert('Optimierung gestartet — Funktionalität folgt.')}
+        <button onClick={() => alert('Optimierung gestartet — Funktionalität folgt.')}
           className="flex items-center justify-center gap-3 w-full py-4 rounded-xl font-bold text-base transition-all active:scale-95"
-          style={{ background: C.yellow, color: C.darkblue, boxShadow: '0 4px 20px rgba(226,236,43,0.4)' }}>
+          style={{ background: C.yellow, color: C.darkblue, boxShadow:'0 4px 20px rgba(226,236,43,0.4)' }}>
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
             <path d="M9 1.5l1.8 3.6 4 .6-2.9 2.8.7 4L9 10.5l-3.6 1.9.7-4L3.2 5.7l4-.6z" fill={C.darkblue}/>
           </svg>
           Optimierung starten
         </button>
-
-        <button onClick={() => setStep(2)} className="text-sm text-center" style={{ color: C.dgray }}>
-          ← Zurück
-        </button>
+        <button onClick={() => setStep(2)} className="text-sm text-center" style={{ color: C.dgray }}>← Zurück</button>
       </div>
     );
   };
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: C.bg }}>
-      {/* Header */}
       <header className="border-b bg-white px-8 py-4 flex items-center justify-between sticky top-0 z-10"
-        style={{ borderColor: '#E5E7EB' }}>
+        style={{ borderColor:'#E5E7EB' }}>
         <Logo/>
         <Steps current={step}/>
-        <div className="text-xs font-medium px-3 py-1.5 rounded-full"
-          style={{ background: '#F3F4F6', color: C.dgray }}>
+        <div className="text-xs font-medium px-3 py-1.5 rounded-full" style={{ background:'#F3F4F6', color: C.dgray }}>
           Customer Success
         </div>
       </header>
 
-      {/* Main */}
       <main className="flex-1 flex items-start justify-center px-8 py-12">
         <div className="w-full max-w-2xl">
           {step === 1 && <Step1/>}
@@ -499,9 +589,7 @@ const App = () => {
         </div>
       </main>
 
-      {/* Footer */}
-      <footer className="px-8 py-4 border-t flex items-center justify-between"
-        style={{ borderColor: '#E5E7EB', background: '#fff' }}>
+      <footer className="px-8 py-4 border-t flex items-center justify-between" style={{ borderColor:'#E5E7EB', background:'#fff' }}>
         <span className="text-xs" style={{ color: C.lgray }}>ecoplanet Green Operations GmbH · Marsstraße 46, 80335 München</span>
         <span className="text-xs" style={{ color: C.lgray }}>Intern · Customer Success</span>
       </footer>
