@@ -32,10 +32,6 @@
 <script type="text/babel">
 const { useState, useRef, useEffect, useCallback } = React;
 
-/* ── Google Apps Script Web App URL ── */
-/* Replace with your deployed Apps Script URL after setup */
-const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbzEVf4FuOIH8yZsGPwz-76tlazapfAFSRTVcIwI47_M3wBa78UiAQIgtt9rWZxn4ZrmCg/exec';
-
 /* Strip legal suffixes to build short company name */
 const shortName = (name) =>
   name.replace(/\s*(GmbH\s*&\s*Co\.?\s*KG|GmbH\s*&\s*Co\.|GmbH|AG|SE|KG|OHG|UG\s*\(haftungsbeschränkt\)|UG|e\.K\.|eK)\s*/gi, '').replace(/\s+/g, ' ').trim();
@@ -693,33 +689,9 @@ const App = () => {
             setSheetLoading(true);
             setSheetError('');
             try {
-              if (APPS_SCRIPT_URL === 'PASTE_YOUR_APPS_SCRIPT_URL_HERE') {
-                throw new Error('Apps Script URL noch nicht eingetragen.');
-              }
-              const data = await new Promise((resolve, reject) => {
-                const cbName = 'gsc_' + Date.now();
-                const script = document.createElement('script');
-                const qs = new URLSearchParams({ company, lieferjahr: lieferjahre[0], callback: cbName });
-                const timer = setTimeout(() => {
-                  delete window[cbName];
-                  document.head.removeChild(script);
-                  reject(new Error('Timeout — Apps Script hat nicht geantwortet.'));
-                }, 30000);
-                window[cbName] = (result) => {
-                  clearTimeout(timer);
-                  delete window[cbName];
-                  document.head.removeChild(script);
-                  resolve(result);
-                };
-                script.onerror = () => {
-                  clearTimeout(timer);
-                  delete window[cbName];
-                  document.head.removeChild(script);
-                  reject(new Error('Script konnte nicht geladen werden.'));
-                };
-                script.src = APPS_SCRIPT_URL + '?' + qs;
-                document.head.appendChild(script);
-              });
+              const qs = new URLSearchParams({ company, lieferjahr: lieferjahre[0] });
+              const res = await fetch(`/api/create-sheet?${qs}`);
+              const data = await res.json();
               if (data.url) {
                 setSheetUrl(data.url);
               } else {
