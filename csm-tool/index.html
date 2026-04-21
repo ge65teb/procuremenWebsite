@@ -29,7 +29,7 @@
 <body>
 <div id="root"></div>
 <script type="text/babel">
-const { useState, useRef, useCallback } = React;
+const { useState, useRef, useEffect, useCallback } = React;
 
 const C = {
   blue:     '#1A2FEE',
@@ -78,13 +78,13 @@ const Steps = ({ current }) => {
 };
 
 /* ── Text input field ── */
-const Field = ({ label, value, onChange, placeholder, autoFocus }) => (
+const Field = ({ label, value, onChange, placeholder, inputRef }) => (
   <div>
     <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: C.dgray }}>
       {label}
     </label>
     <input
-      autoFocus={autoFocus}
+      ref={inputRef}
       type="text"
       value={value}
       onChange={e => onChange(e.target.value)}
@@ -224,8 +224,12 @@ const App = () => {
   const [files, setFiles]           = useState([]);
   const [dragging, setDragging]     = useState(false);
   const [error, setError]           = useState('');
-  const dropRef  = useRef(null);
-  const inputRef = useRef(null);
+  const dropRef      = useRef(null);
+  const inputRef     = useRef(null);
+  const companyRef   = useRef(null);
+
+  /* focus company field only on first render */
+  useEffect(() => { companyRef.current?.focus(); }, []);
 
   const isGas      = energietraeger === 'Gas';
   const isPvVorhanden = pvStatus === 'vorhanden';
@@ -263,15 +267,15 @@ const App = () => {
 
   /* ── Step 1 ── */
   const Step1 = () => (
-    <div className="fade-in flex flex-col gap-5 max-w-lg mx-auto">
+    <div className="flex flex-col gap-5 max-w-lg mx-auto">
       <div>
         <h2 className="text-2xl font-bold mb-1" style={{ color: C.darkblue }}>Kunde anlegen</h2>
         <p className="text-sm" style={{ color: C.dgray }}>Kundendaten und Beschaffungsparameter eintragen.</p>
       </div>
 
       {/* Company + address */}
-      <Field label="Firmenname" value={company} onChange={setCompany} placeholder="z.B. NORMA Group SE" autoFocus/>
-      <Field label="Adresse" value={adresse} onChange={setAdresse} placeholder="z.B. Ingolstädter Str. 1, 90451 Nürnberg"/>
+      <Field label="Firmenname" value={company} onChange={setCompany} placeholder="z.B. NORMA Group SE" inputRef={companyRef}/>
+      <Field label="Adresse" value={adresse} onChange={setAdresse} placeholder="z.B. Ingolstädter Str. 1, 90451 Nürnberg" inputRef={undefined}/>
 
       <div className="border-t" style={{ borderColor: '#F0F0F0' }}/>
 
@@ -410,7 +414,7 @@ const App = () => {
 
   /* ── Step 2: File upload ── */
   const Step2 = () => (
-    <div className="fade-in flex flex-col gap-6 max-w-2xl mx-auto w-full">
+    <div className="flex flex-col gap-6 max-w-2xl mx-auto w-full">
       <div>
         <div className="flex items-center gap-2 mb-1">
           <h2 className="text-2xl font-bold" style={{ color: C.darkblue }}>Lastgänge hochladen</h2>
@@ -497,7 +501,7 @@ const App = () => {
     ].filter(Boolean);
 
     return (
-      <div className="fade-in flex flex-col gap-6 max-w-lg mx-auto w-full">
+      <div className="flex flex-col gap-6 max-w-lg mx-auto w-full">
         <div>
           <h2 className="text-2xl font-bold mb-1" style={{ color: C.darkblue }}>Übersicht</h2>
           <p className="text-sm" style={{ color: C.dgray }}>Bitte prüfe alle Angaben vor dem Abschluss.</p>
@@ -583,9 +587,9 @@ const App = () => {
 
       <main className="flex-1 flex items-start justify-center px-8 py-12">
         <div className="w-full max-w-2xl">
-          {step === 1 && <Step1/>}
-          {step === 2 && <Step2/>}
-          {step === 3 && <Step3/>}
+          {step === 1 && Step1()}
+          {step === 2 && Step2()}
+          {step === 3 && Step3()}
         </div>
       </main>
 
