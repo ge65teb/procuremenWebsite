@@ -693,21 +693,21 @@ const App = () => {
             setSheetLoading(true);
             setSheetError('');
             try {
-              const res = await fetch(APPS_SCRIPT_URL, {
-                method: 'POST',
-                body: JSON.stringify({
-                  company: company,
-                  lieferjahr: lieferjahre[0],
-                }),
-              });
-              const data = await res.json();
+              if (APPS_SCRIPT_URL === 'PASTE_YOUR_APPS_SCRIPT_URL_HERE') {
+                throw new Error('Apps Script URL noch nicht eingetragen.');
+              }
+              const qs = new URLSearchParams({ company, lieferjahr: lieferjahre[0] });
+              const res = await fetch(`${APPS_SCRIPT_URL}?${qs}`, { redirect: 'follow' });
+              const text = await res.text();
+              let data;
+              try { data = JSON.parse(text); } catch(_) { throw new Error('Ungültige Serverantwort: ' + text.slice(0, 120)); }
               if (data.url) {
                 setSheetUrl(data.url);
               } else {
                 setSheetError(data.error || 'Unbekannter Fehler beim Erstellen des Sheets.');
               }
             } catch (err) {
-              setSheetError('Verbindung zum Server fehlgeschlagen. Bitte Apps Script URL prüfen.');
+              setSheetError(err.message || 'Verbindung fehlgeschlagen.');
             } finally {
               setSheetLoading(false);
             }
