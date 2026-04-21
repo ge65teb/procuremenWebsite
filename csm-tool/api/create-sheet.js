@@ -18,9 +18,8 @@ function httpsGet(url) {
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
 
-  const company    = req.query.company    || 'Unbekannt';
-  const lieferjahr = req.query.lieferjahr || '2027';
-  const qs = 'company=' + encodeURIComponent(company) + '&lieferjahr=' + encodeURIComponent(lieferjahr);
+  // Forward all query params to Apps Script
+  const qs = new URLSearchParams(req.query).toString();
 
   try {
     const body = await httpsGet(SCRIPT_URL + '?' + qs);

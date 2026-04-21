@@ -689,7 +689,22 @@ const App = () => {
             setSheetLoading(true);
             setSheetError('');
             try {
-              const qs = new URLSearchParams({ company, lieferjahr: lieferjahre[0] });
+              const sortedJahre = [...lieferjahre].sort();
+              const pvLeistungMWp = isPvVorhanden
+                ? pvAnlagen.reduce((s, a) => s + (parseFloat(a.leistung) || 0), 0) / 1000
+                : 0;
+              const qs = new URLSearchParams({
+                company:          company,
+                lieferjahr:       sortedJahre[0],
+                address:          adresse,
+                bonitaet:         bonitaet,
+                pvAnzahl:         isPvVorhanden ? pvAnzahl : 0,
+                pvLeistung:       isPvVorhanden ? pvLeistungMWp : 0,
+                gruenstrom:       isGas ? 'nein' : gruenstrom.toLowerCase(),
+                ppa:              (isGas || ppaDisabled) ? 'nein' : ppa.toLowerCase(),
+                lieferjahrAnfang: sortedJahre[0],
+                lieferjahrEnde:   sortedJahre[sortedJahre.length - 1],
+              });
               const res = await fetch(`/api/create-sheet?${qs}`);
               const data = await res.json();
               if (data.url) {
