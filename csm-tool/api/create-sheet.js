@@ -460,12 +460,12 @@ module.exports = async function handler(req, res) {
         // ── DST corrections ──────────────────────────────────────────────────
         // Returns the last Sunday of a given month (0-indexed) in a year as a Date
         function lastSundayOf(year, month0) {
-          const lastDay = new Date(year, month0 + 1, 0); // last day of month
-          const dow = lastDay.getDay();                   // 0 = Sunday
+          const lastDay = new Date(year, month0 + 1, 0);
+          const dow = lastDay.getDay(); // 0 = Sunday
           return new Date(year, month0, lastDay.getDate() - (dow === 0 ? 0 : dow));
         }
 
-        // Parse common German "DD.MM.YYYY HH:MM" or ISO "YYYY-MM-DD HH:MM" timestamp
+        // Parse German "DD.MM.YYYY HH:MM" or ISO "YYYY-MM-DD HH:MM" timestamp string
         function parseDt(s) {
           if (!s) return null;
           const str = String(s).trim();
@@ -476,19 +476,14 @@ module.exports = async function handler(req, res) {
           return null;
         }
 
-        // Read B35 to get data start timestamp
-        const b35Read = await sheets.spreadsheets.values.get({
-          spreadsheetId: newId,
-          range: `'${glTitle}'!B35`,
-        });
-        const b35Val = ((b35Read.data.values || [['']])[0] || [''])[0];
-        const startDt = parseDt(b35Val);
+        // Derive startDt from the first data row we already have in memory.
+        // Falls back to Jan 1 of anfang year (standard for annual profiles).
+        // This avoids reading B35 from the sheet, which Sheets stores as a date
+        // serial number making string parsing unreliable.
+        const startDt = (dataRows.length > 0 ? parseDt(dataRows[0][0]) : null)
+                     || new Date(anfang, 0, 1, 0, 0, 0, 0);
 
-        // Sum column is always G (colLetter(4)) in the template.
-        // If we inserted numExtraCols before G, it shifts right by that many.
-        // colLetter(max(4, numCols)) covers both cases.
-        const sumColLetter = colLetter(Math.max(4, numCols));
-        const glSheetId    = sheetIdMap[glTitle];
+        const glSheetId = sheetIdMap[glTitle];
 
         // DST corrections — wrapped in own try/catch so errors never suppress the copy below
         try {
@@ -563,36 +558,42 @@ module.exports = async function handler(req, res) {
           gesamtError = (gesamtError ? gesamtError + ' | ' : '') + 'DST: ' + dstErr.message;
         }
 
-        // 3. Copy sum column → "2) Input - Load profile" B2+ (values only)
-        // Runs independently of DST corrections so a missing start timestamp doesn't block it.
-        let inputCopyDebug = { numCols, sumColLetter, inputTitle: null, rowsRead: 0, rowsWritten: 0 };
+        // 3. Copy load totals → "2) Input - Load profile" B2+
+        // Read data columns C:endCol from Gesamtlastgang (post-DST), sum each row in JS.
+        // This avoids any dependency on the SUM formula in col G which only exists in row 35.
+        let inputCopyDebug = { numCols, endCol, inputTitle: null, rowsRead: 0, rowsWritten: 0 };
         if (numCols > 0) {
           try {
             const inputTitle = sheetTitles.find(t => /2\).*input/i.test(t))
                             || sheetTitles.find(t => /input.*load/i.test(t))
                             || sheetTitles.find(t => /load.*profile/i.test(t));
             inputCopyDebug.inputTitle = inputTitle || '(not found)';
-            inputCopyDebug.glTitle    = glTitle;
             if (inputTitle) {
-              const sumRead = await sheets.spreadsheets.values.get({
+              // Read all value columns (C … endCol) from Gesamtlastgang rows 35+
+              const dataRead = await sheets.spreadsheets.values.get({
                 spreadsheetId: newId,
-                range: `'${glTitle}'!${sumColLetter}35:${sumColLetter}70000`,
+                range: `'${glTitle}'!C35:${endCol}70000`,
                 valueRenderOption: 'UNFORMATTED_VALUE',
               });
-              const sumVals = (sumRead.data.values || []).map(r => [r[0] !== undefined ? r[0] : '']);
-              inputCopyDebug.rowsRead = sumVals.length;
-              if (sumVals.length > 0) {
+              const rawRows = dataRead.data.values || [];
+              inputCopyDebug.rowsRead = rawRows.length;
+              // Sum across columns for each row
+              const inputVals = rawRows.map(row => {
+                const sum = row.reduce((s, v) => {
+                  const n = parseFloat(String(v).replace(',', '.'));
+                  return s + (isNaN(n) ? 0 : n);
+                }, 0);
+                return [sum];
+              });
+              if (inputVals.length > 0) {
                 await sheets.spreadsheets.values.batchUpdate({
                   spreadsheetId: newId,
                   requestBody: {
                     valueInputOption: 'RAW',
-                    data: [{
-                      range:  `'${inputTitle}'!B2:B${1 + sumVals.length}`,
-                      values: sumVals,
-                    }],
+                    data: [{ range: `'${inputTitle}'!B2:B${1 + inputVals.length}`, values: inputVals }],
                   },
                 });
-                inputCopyDebug.rowsWritten = sumVals.length;
+                inputCopyDebug.rowsWritten = inputVals.length;
               }
             }
           } catch (e) {
