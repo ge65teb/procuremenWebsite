@@ -111,24 +111,43 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    // 4. Prepare Abnahmestellen data (from XLSX)
-    let abnahmeData = null;
-    if (xlsxContent) {
-      const rows = parseXLSX(xlsxContent);
-      if (rows.length) {
-        abnahmeData = { range: `'${SHEET_ABNAHME}'!A1`, values: rows };
-      }
+    // 4. Fetch actual sheet names from the copied file
+    const meta = await sheets.spreadsheets.get({ spreadsheetId: newId, fields: 'sheets.properties.title' });
+    const sheetTitles = meta.data.sheets.map(s => s.properties.title);
+
+    function findSheet(keyword) {
+      return sheetTitles.find(t => t.toLowerCase().includes(keyword.toLowerCase())) || null;
     }
 
-    // 5. Write all data in one batch
+    // 5. Write Sales + Lastgänge in one batch
     const batchData = [...salesData];
-    if (lastgaengeData) batchData.push(lastgaengeData);
-    if (abnahmeData)    batchData.push(abnahmeData);
+
+    const lgTitle = findSheet('lastgang') || findSheet('lastg');
+    if (lastgaengeData && lgTitle) {
+      batchData.push({ ...lastgaengeData, range: `'${lgTitle}'!A1` });
+    } else if (lastgaengeData) {
+      batchData.push(lastgaengeData);
+    }
 
     await sheets.spreadsheets.values.batchUpdate({
       spreadsheetId: newId,
       requestBody: { valueInputOption: 'USER_ENTERED', data: batchData },
     });
+
+    // 6. Write Abnahmestellen separately (different tab, keep errors isolated)
+    if (xlsxContent) {
+      const rows = parseXLSX(xlsxContent);
+      if (rows.length) {
+        const abTitle = findSheet('abnahme') || SHEET_ABNAHME;
+        await sheets.spreadsheets.values.batchUpdate({
+          spreadsheetId: newId,
+          requestBody: {
+            valueInputOption: 'USER_ENTERED',
+            data: [{ range: `'${abTitle}'!A1`, values: rows }],
+          },
+        });
+      }
+    }
 
     res.status(200).json({ url });
   } catch (err) {
