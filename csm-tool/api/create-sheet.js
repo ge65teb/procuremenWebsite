@@ -490,82 +490,89 @@ module.exports = async function handler(req, res) {
         const sumColLetter = colLetter(Math.max(4, numCols));
         const glSheetId    = sheetIdMap[glTitle];
 
-        if (startDt && glSheetId !== undefined) {
-          // 1. Delete fall-back duplicates first (highest rows → descending years)
-          for (let year = ende; year >= anfang; year--) {
-            const fallSunday = lastSundayOf(year, 9); // October
-            const fallDt     = new Date(year, 9, fallSunday.getDate(), 2, 0, 0, 0);
-            const fallOffset = Math.round((fallDt - startDt) / (15 * 60 * 1000));
-            if (fallOffset <= 0) continue;
-            const fallRowIdx = 34 + fallOffset; // 0-indexed sheet row for 02:00
-            await sheets.spreadsheets.batchUpdate({
-              spreadsheetId: newId,
-              requestBody: {
-                requests: [{ deleteDimension: {
-                  range: {
-                    sheetId:    glSheetId,
-                    dimension:  'ROWS',
-                    startIndex: fallRowIdx,
-                    endIndex:   fallRowIdx + 4,
-                  },
-                }}],
-              },
-            });
+        // DST corrections — wrapped in own try/catch so errors never suppress the copy below
+        try {
+          if (startDt && glSheetId !== undefined) {
+            // 1. Delete fall-back duplicates first (highest rows → descending years)
+            for (let year = ende; year >= anfang; year--) {
+              const fallSunday = lastSundayOf(year, 9); // October
+              const fallDt     = new Date(year, 9, fallSunday.getDate(), 2, 0, 0, 0);
+              const fallOffset = Math.round((fallDt - startDt) / (15 * 60 * 1000));
+              if (fallOffset <= 0) continue;
+              const fallRowIdx = 34 + fallOffset; // 0-indexed sheet row for 02:00
+              await sheets.spreadsheets.batchUpdate({
+                spreadsheetId: newId,
+                requestBody: {
+                  requests: [{ deleteDimension: {
+                    range: {
+                      sheetId:    glSheetId,
+                      dimension:  'ROWS',
+                      startIndex: fallRowIdx,
+                      endIndex:   fallRowIdx + 4,
+                    },
+                  }}],
+                },
+              });
+            }
+
+            // 2. Insert spring-forward rows (lowest rows → ascending years, adjust for prior inserts)
+            let springRowAdj = 0;
+            for (let year = anfang; year <= ende; year++) {
+              const springSunday = lastSundayOf(year, 2); // March
+              const springDt     = new Date(year, 2, springSunday.getDate(), 2, 0, 0, 0);
+              const springOffset = Math.round((springDt - startDt) / (15 * 60 * 1000));
+              if (springOffset <= 0) continue;
+              const springRowIdx = 34 + springOffset + springRowAdj; // 0-indexed row for 02:00
+
+              await sheets.spreadsheets.batchUpdate({
+                spreadsheetId: newId,
+                requestBody: {
+                  requests: [{ insertDimension: {
+                    range: {
+                      sheetId:    glSheetId,
+                      dimension:  'ROWS',
+                      startIndex: springRowIdx,
+                      endIndex:   springRowIdx + 4,
+                    },
+                    inheritFromBefore: true,
+                  }}],
+                },
+              });
+
+              // Write timestamps + zero values for the 4 inserted rows (02:00–02:45)
+              const dStr = `${String(springSunday.getDate()).padStart(2,'0')}.${String(springSunday.getMonth()+1).padStart(2,'0')}.${springSunday.getFullYear()}`;
+              const springFillRows = [0,1,2,3].map(q => {
+                const mins = q * 15;
+                const ts   = `${dStr} 02:${String(mins).padStart(2,'0')}`;
+                return [ts, ...Array(numCols).fill(0)];
+              });
+              await sheets.spreadsheets.values.batchUpdate({
+                spreadsheetId: newId,
+                requestBody: {
+                  valueInputOption: 'USER_ENTERED',
+                  data: [{
+                    range:  `'${glTitle}'!B${springRowIdx + 1}:${endCol}${springRowIdx + 4}`,
+                    values: springFillRows,
+                  }],
+                },
+              });
+              springRowAdj += 4;
+            }
           }
-
-          // 2. Insert spring-forward rows (lowest rows → ascending years, adjust for prior inserts)
-          let springRowAdj = 0;
-          for (let year = anfang; year <= ende; year++) {
-            const springSunday = lastSundayOf(year, 2); // March
-            const springDt     = new Date(year, 2, springSunday.getDate(), 2, 0, 0, 0);
-            const springOffset = Math.round((springDt - startDt) / (15 * 60 * 1000));
-            if (springOffset <= 0) continue;
-            const springRowIdx = 34 + springOffset + springRowAdj; // 0-indexed row for 02:00
-
-            await sheets.spreadsheets.batchUpdate({
-              spreadsheetId: newId,
-              requestBody: {
-                requests: [{ insertDimension: {
-                  range: {
-                    sheetId:    glSheetId,
-                    dimension:  'ROWS',
-                    startIndex: springRowIdx,
-                    endIndex:   springRowIdx + 4,
-                  },
-                  inheritFromBefore: true,
-                }}],
-              },
-            });
-
-            // Write timestamps + zero values for the 4 inserted rows (02:00–02:45)
-            const dStr = `${String(springSunday.getDate()).padStart(2,'0')}.${String(springSunday.getMonth()+1).padStart(2,'0')}.${springSunday.getFullYear()}`;
-            const springFillRows = [0,1,2,3].map(q => {
-              const mins = q * 15;
-              const ts   = `${dStr} 02:${String(mins).padStart(2,'0')}`;
-              return [ts, ...Array(numCols).fill(0)];
-            });
-            await sheets.spreadsheets.values.batchUpdate({
-              spreadsheetId: newId,
-              requestBody: {
-                valueInputOption: 'USER_ENTERED',
-                data: [{
-                  range:  `'${glTitle}'!B${springRowIdx + 1}:${endCol}${springRowIdx + 4}`,
-                  values: springFillRows,
-                }],
-              },
-            });
-            springRowAdj += 4;
-          }
-
+        } catch (dstErr) {
+          gesamtError = (gesamtError ? gesamtError + ' | ' : '') + 'DST: ' + dstErr.message;
         }
 
         // 3. Copy sum column → "2) Input - Load profile" B2+ (values only)
         // Runs independently of DST corrections so a missing start timestamp doesn't block it.
+        let inputCopyDebug = { numCols, sumColLetter, inputTitle: null, rowsRead: 0, rowsWritten: 0 };
         if (numCols > 0) {
           try {
             const inputTitle = sheetTitles.find(t => /2\).*input/i.test(t))
                             || sheetTitles.find(t => /input.*load/i.test(t))
                             || sheetTitles.find(t => /load.*profile/i.test(t));
+            inputCopyDebug.inputTitle = inputTitle || '(not found)';
+            inputCopyDebug.glTitle    = glTitle;
             if (inputTitle) {
               const sumRead = await sheets.spreadsheets.values.get({
                 spreadsheetId: newId,
@@ -573,6 +580,7 @@ module.exports = async function handler(req, res) {
                 valueRenderOption: 'UNFORMATTED_VALUE',
               });
               const sumVals = (sumRead.data.values || []).map(r => [r[0] !== undefined ? r[0] : '']);
+              inputCopyDebug.rowsRead = sumVals.length;
               if (sumVals.length > 0) {
                 await sheets.spreadsheets.values.batchUpdate({
                   spreadsheetId: newId,
@@ -584,10 +592,12 @@ module.exports = async function handler(req, res) {
                     }],
                   },
                 });
+                inputCopyDebug.rowsWritten = sumVals.length;
               }
             }
           } catch (e) {
             gesamtError = (gesamtError ? gesamtError + ' | ' : '') + 'InputLoad: ' + e.message;
+            inputCopyDebug.error = e.message;
           }
         }
       } catch (e) {
@@ -596,7 +606,8 @@ module.exports = async function handler(req, res) {
     }
 
     res.status(200).json({ url, sheetTitles, abnahmeError, gesamtError,
-      _debug: { xlsxRows: abnahmeRows.length, xlsxHdrs: abnahmeRows[0] || [] } });
+      _debug: { xlsxRows: abnahmeRows.length, xlsxHdrs: abnahmeRows[0] || [],
+                inputCopyDebug: typeof inputCopyDebug !== 'undefined' ? inputCopyDebug : null } });
   } catch (err) {
     const detail = err.response?.data?.error || err.message;
     res.status(500).json({ error: typeof detail === 'object' ? JSON.stringify(detail) : detail });
