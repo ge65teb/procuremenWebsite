@@ -257,7 +257,14 @@ module.exports = async function handler(req, res) {
 
         // No cap: support all value columns found in the data
         const numCols  = allValCols.length;
-        const colLetter = i => String.fromCharCode(67 + i); // 0=C, 1=D, …, 4=G, 5=H, …
+        // Converts 0-based value-column index to spreadsheet column letter(s).
+        // i=0 → 'C', i=1 → 'D', …, i=23 → 'Z', i=24 → 'AA', i=25 → 'AB', …
+        const colLetter = i => {
+          let n = i + 3; // C is the 3rd column (A=1, B=2, C=3)
+          let s = '';
+          while (n > 0) { n--; s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26); }
+          return s;
+        };
         const endCol   = numCols > 0 ? colLetter(numCols - 1) : 'C';
 
         // If >4 columns: insert extra columns before the sum column (G = sheet col-index 6).
