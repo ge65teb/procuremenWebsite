@@ -712,6 +712,7 @@ const App = () => {
                   bonitaet,
                   pvAnzahl:         isPvVorhanden ? pvAnzahl : 0,
                   pvLeistung:       isPvVorhanden ? pvLeistungMWp : 0,
+                  energietraeger:   energietraeger.toLowerCase(),
                   gruenstrom:       isGas ? 'nein' : gruenstrom.toLowerCase(),
                   ppa:              (isGas || ppaDisabled) ? 'nein' : ppa.toLowerCase(),
                   lieferjahrAnfang: sortedJahre[0],

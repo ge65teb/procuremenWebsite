@@ -52,8 +52,13 @@ module.exports = async function handler(req, res) {
   // Support both GET (legacy) and POST (with files)
   const body = req.method === 'POST' ? (req.body || {}) : req.query;
   const { company, lieferjahr, address, bonitaet, pvAnzahl, pvLeistung,
-          gruenstrom, ppa, lieferjahrAnfang, lieferjahrEnde,
+          gruenstrom, ppa, lieferjahrAnfang, lieferjahrEnde, energietraeger,
           csvContents, xlsxContent } = body;
+
+  // Derive Energieart for Gesamtlastgang row 13
+  const energieart = (energietraeger || '').toLowerCase() === 'gas'
+    ? 'Gas'
+    : (gruenstrom || '').toLowerCase() === 'ja' ? 'Ökostrom' : 'Graustrom';
 
   try {
     const auth   = getAuth();
@@ -404,7 +409,7 @@ module.exports = async function handler(req, res) {
             r10.push(ls.malo       || '');
             r11.push(ls.melo       || '');
             r12.push(ls.messstelle || 'RLM');
-            r13.push(ls.energieart || '');
+            r13.push(energieart);
             r15.push(valColNames[i] || ls.name || '');  // Standort from CSV header
             r16.push(ls.strasse    || '');
             r17.push(ls.plzOrt     || '');
