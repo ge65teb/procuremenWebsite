@@ -689,23 +689,37 @@ const App = () => {
             setSheetLoading(true);
             setSheetError('');
             try {
+              const readText   = f => new Promise((ok, err) => { const r = new FileReader(); r.onload = e => ok(e.target.result); r.onerror = err; r.readAsText(f, 'UTF-8'); });
+              const readBase64 = f => new Promise((ok, err) => { const r = new FileReader(); r.onload = e => ok(e.target.result.split(',')[1]); r.onerror = err; r.readAsDataURL(f); });
+
               const sortedJahre = [...lieferjahre].sort();
               const pvLeistungMWp = isPvVorhanden
                 ? pvAnlagen.reduce((s, a) => s + (parseFloat(a.leistung) || 0), 0) / 1000
                 : 0;
-              const qs = new URLSearchParams({
-                company:          company,
-                lieferjahr:       sortedJahre[0],
-                address:          adresse,
-                bonitaet:         bonitaet,
-                pvAnzahl:         isPvVorhanden ? pvAnzahl : 0,
-                pvLeistung:       isPvVorhanden ? pvLeistungMWp : 0,
-                gruenstrom:       isGas ? 'nein' : gruenstrom.toLowerCase(),
-                ppa:              (isGas || ppaDisabled) ? 'nein' : ppa.toLowerCase(),
-                lieferjahrAnfang: sortedJahre[0],
-                lieferjahrEnde:   sortedJahre[sortedJahre.length - 1],
+
+              const [csvContents, xlsxContent] = await Promise.all([
+                Promise.all(verbrauchsFiles.map(readText)),
+                lieferstelleFiles.length > 0 ? readBase64(lieferstelleFiles[0]) : Promise.resolve(null),
+              ]);
+
+              const res = await fetch('/api/create-sheet', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  company,
+                  lieferjahr:       sortedJahre[0],
+                  address:          adresse,
+                  bonitaet,
+                  pvAnzahl:         isPvVorhanden ? pvAnzahl : 0,
+                  pvLeistung:       isPvVorhanden ? pvLeistungMWp : 0,
+                  gruenstrom:       isGas ? 'nein' : gruenstrom.toLowerCase(),
+                  ppa:              (isGas || ppaDisabled) ? 'nein' : ppa.toLowerCase(),
+                  lieferjahrAnfang: sortedJahre[0],
+                  lieferjahrEnde:   sortedJahre[sortedJahre.length - 1],
+                  csvContents,
+                  xlsxContent,
+                }),
               });
-              const res = await fetch(`/api/create-sheet?${qs}`);
               const data = await res.json();
               if (data.url) {
                 setSheetUrl(data.url);
