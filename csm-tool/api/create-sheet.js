@@ -48,6 +48,7 @@ module.exports = async function handler(req, res) {
 
     const copyRes = await drive.files.copy({
       fileId: TEMPLATE_ID,
+      supportsAllDrives: true,
       requestBody: { name: fileName, parents: [FOLDER_ID] },
       fields: 'id',
     });
