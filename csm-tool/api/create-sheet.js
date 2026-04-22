@@ -89,7 +89,6 @@ module.exports = async function handler(req, res) {
       { range: `'${SHEET_SALES}'!C6`,  values: [[street]] },
       { range: `'${SHEET_SALES}'!C7`,  values: [[city]] },
       { range: `'${SHEET_SALES}'!C8`,  values: [[(bonitaet || '').toLowerCase()]] },
-      { range: `'${SHEET_SALES}'!C21`, values: [[anfang]] },
       { range: `'${SHEET_SALES}'!C24`, values: [[(gruenstrom || 'nein').toLowerCase()]] },
       { range: `'${SHEET_SALES}'!C25`, values: [[(ppa || 'nein').toLowerCase()]] },
       { range: `'${SHEET_SALES}'!C27`, values: [[anfang]] },
