@@ -312,16 +312,51 @@ module.exports = async function handler(req, res) {
         const lieferstellen = [];
         const xlsxDebugHdrs = abnahmeRows.length > 0
           ? abnahmeRows[0].map(h => String(h)).join(' | ') : '(keine XLSX-Daten)';
+        // ── Lieferstellen matching ────────────────────────────────────────────
+        // Step 1: extract the column header name for each value column from Lastgänge.
+        //   This is the Standort label used for matching (e.g. "Werk Berlin (kW)").
+        const valColNames = allValCols.map(({ di, ci }) => {
+          const ds = datasets[di];
+          const info = dsInfo[di];
+          return info.hdr && ds[0] ? String(ds[0][ci] || '').trim() : '';
+        });
+
+        // Step 2: normalise a string for fuzzy comparison
+        function normName(s) {
+          return String(s || '').toLowerCase()
+            .replace(/\[.*?\]|\(.*?\)/g, '')          // strip [unit] and (note)
+            .replace(/\bkwh?\b|\bmwh?\b/gi, '')        // strip unit words
+            .replace(/[^a-z0-9äöüß]+/gi, ' ')
+            .replace(/\s+/g, ' ').trim();
+        }
+
+        // Step 3: score similarity (0–100) between two name strings
+        function nameScore(a, b) {
+          const na = normName(a); const nb = normName(b);
+          if (!na || !nb) return 0;
+          if (na === nb) return 100;
+          if (na.includes(nb) || nb.includes(na)) return 80;
+          const wa = new Set(na.split(' ').filter(w => w.length > 2));
+          const wb = new Set(nb.split(' ').filter(w => w.length > 2));
+          const hits = [...wa].filter(w => wb.has(w)).length;
+          const total = new Set([...wa, ...wb]).size;
+          return total > 0 ? Math.round((hits / total) * 60) : 0;
+        }
+
+        // Step 4: parse Abnahmestellen XLSX into structured rows
+        const abDataRows = [];  // array of { malo, melo, messstelle, energieart, name, strasse, plzOrt }
         if (abnahmeRows.length > 1) {
           const hdrs = abnahmeRows[0].map(h => String(h).toLowerCase().trim());
           const ix = {
-            malo:    hdrs.findIndex(h => /marktlok|malo/.test(h)),
-            melo:    hdrs.findIndex(h => /messlok|melo/.test(h)),
-            name:    hdrs.findIndex(h => /standort|bezeichnung|^name$/.test(h)),
-            strasse: hdrs.findIndex(h => /stra[ßs]/i.test(h)),
-            plz:     hdrs.findIndex(h => /^plz$/.test(h)),
-            ort:     hdrs.findIndex(h => /^ort$|^stadt$/.test(h)),
-            adresse: hdrs.findIndex(h => /^adresse?$|^anschrift$/.test(h)),
+            malo:       hdrs.findIndex(h => /marktlok|^malo/.test(h)),
+            melo:       hdrs.findIndex(h => /messlok|^melo/.test(h)),
+            messstelle: hdrs.findIndex(h => /messstelle|zählerart|zählertyp|^rlm$|^slp$/.test(h)),
+            energieart: hdrs.findIndex(h => /energieart|stromtyp|^öko|^grün/.test(h)),
+            name:       hdrs.findIndex(h => /standort|bezeichnung|^name$|lieferst/.test(h)),
+            strasse:    hdrs.findIndex(h => /stra[ßs]/i.test(h)),
+            plz:        hdrs.findIndex(h => /^plz$/.test(h)),
+            ort:        hdrs.findIndex(h => /^ort$|^stadt$/.test(h)),
+            adresse:    hdrs.findIndex(h => /^adresse?$|^anschrift$/.test(h)),
           };
           const g = (r, k) => ix[k] >= 0 ? String(r[ix[k]] || '').trim() : '';
           for (let i = 1; i < abnahmeRows.length; i++) {
@@ -329,13 +364,30 @@ module.exports = async function handler(req, res) {
             if (!r || !r.some(c => String(c).trim())) continue;
             const strasse = g(r, 'strasse');
             const plz = g(r, 'plz'); const ort = g(r, 'ort');
-            const addr = ix.adresse >= 0 ? g(r, 'adresse')
-              : [strasse, [plz, ort].filter(Boolean).join(' ')].filter(Boolean).join(', ');
-            lieferstellen.push({ malo: g(r,'malo'), melo: g(r,'melo'), name: g(r,'name'), addr });
+            const plzOrt = [plz, ort].filter(Boolean).join(' ');
+            const addrFull = ix.adresse >= 0 ? g(r, 'adresse') : strasse;
+            abDataRows.push({
+              malo: g(r,'malo'), melo: g(r,'melo'),
+              messstelle: g(r,'messstelle'), energieart: g(r,'energieart'),
+              name: g(r,'name'), strasse: addrFull, plzOrt,
+            });
           }
         }
 
-        // Today's date for "Stand:" field
+        // Step 5: for each value column, find best-matching Abnahmestellen row by name
+        const matchDebug = [];
+        const matchedLS = valColNames.map((colName, i) => {
+          let best = null; let bestScore = -1;
+          for (const ab of abDataRows) {
+            const score = nameScore(colName, ab.name);
+            if (score > bestScore) { bestScore = score; best = ab; }
+          }
+          matchDebug.push({ col: i, colName, matched: best?.name || '–', score: bestScore });
+          // fall back to index order if score is 0 (no names available)
+          return bestScore > 0 ? best : (abDataRows[i] || null);
+        });
+
+        // ── Today's date ──────────────────────────────────────────────────────
         const now2 = new Date();
         const todayStr = `${String(now2.getDate()).padStart(2,'0')}.${String(now2.getMonth()+1).padStart(2,'0')}.${now2.getFullYear()}`;
 
@@ -344,23 +396,26 @@ module.exports = async function handler(req, res) {
           { range: `'${glTitle}'!C9`, values: [[company || '']] },
         ];
 
-        // Metadata rows: one column per value column (= one per Lieferstelle)
+        // ── Metadata rows 10-17 (one spreadsheet column per Lieferstelle) ─────
         if (numCols > 0) {
-          const maloRow = [], meloRow = [], nameRow = [], strasseRow = [], plzOrtRow = [];
+          const r10 = [], r11 = [], r12 = [], r13 = [], r15 = [], r16 = [], r17 = [];
           for (let i = 0; i < numCols; i++) {
-            const ls = lieferstellen[i] || {};
-            maloRow.push(ls.malo || '');
-            meloRow.push(ls.melo || '');
-            nameRow.push(ls.name || '');
-            const parts = (ls.addr || '').split(', ');
-            strasseRow.push(parts[0] || '');
-            plzOrtRow.push(parts.slice(1).join(', ') || '');
+            const ls = matchedLS[i] || {};
+            r10.push(ls.malo       || '');
+            r11.push(ls.melo       || '');
+            r12.push(ls.messstelle || 'RLM');
+            r13.push(ls.energieart || '');
+            r15.push(valColNames[i] || ls.name || '');  // Standort from CSV header
+            r16.push(ls.strasse    || '');
+            r17.push(ls.plzOrt     || '');
           }
-          glBatch.push({ range: `'${glTitle}'!C10:${endCol}10`, values: [maloRow] });
-          if (meloRow.some(v => v))    glBatch.push({ range: `'${glTitle}'!C11:${endCol}11`, values: [meloRow] });
-          if (nameRow.some(v => v))    glBatch.push({ range: `'${glTitle}'!C15:${endCol}15`, values: [nameRow] });
-          if (strasseRow.some(v => v)) glBatch.push({ range: `'${glTitle}'!C16:${endCol}16`, values: [strasseRow] });
-          if (plzOrtRow.some(v => v))  glBatch.push({ range: `'${glTitle}'!C17:${endCol}17`, values: [plzOrtRow] });
+          glBatch.push({ range: `'${glTitle}'!C10:${endCol}10`, values: [r10] });
+          if (r11.some(v => v)) glBatch.push({ range: `'${glTitle}'!C11:${endCol}11`, values: [r11] });
+          if (r12.some(v => v)) glBatch.push({ range: `'${glTitle}'!C12:${endCol}12`, values: [r12] });
+          if (r13.some(v => v)) glBatch.push({ range: `'${glTitle}'!C13:${endCol}13`, values: [r13] });
+          if (r15.some(v => v)) glBatch.push({ range: `'${glTitle}'!C15:${endCol}15`, values: [r15] });
+          if (r16.some(v => v)) glBatch.push({ range: `'${glTitle}'!C16:${endCol}16`, values: [r16] });
+          if (r17.some(v => v)) glBatch.push({ range: `'${glTitle}'!C17:${endCol}17`, values: [r17] });
         }
 
         // Data rows: col B = timestamp, cols C+ = one kW value per Lieferstelle
