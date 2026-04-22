@@ -139,10 +139,11 @@ module.exports = async function handler(req, res) {
     });
 
     // 6. Write Abnahmestellen separately (non-fatal)
+    let abnahmeRows = [];
     let abnahmeError = null;
     if (xlsxContent) {
-      const rows = parseXLSX(xlsxContent);
-      if (rows.length) {
+      abnahmeRows = parseXLSX(xlsxContent);
+      if (abnahmeRows.length) {
         const abTitle = findSheet('abnahme') || findSheet('lieferst') || null;
         if (abTitle) {
           try {
@@ -150,7 +151,7 @@ module.exports = async function handler(req, res) {
               spreadsheetId: newId,
               requestBody: {
                 valueInputOption: 'USER_ENTERED',
-                data: [{ range: `'${abTitle}'!A1`, values: rows }],
+                data: [{ range: `'${abTitle}'!A1`, values: abnahmeRows }],
               },
             });
           } catch (e) {
@@ -162,7 +163,123 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    res.status(200).json({ url, sheetTitles, abnahmeError });
+    // 7. Build Gesamtlastgang: col A = auto-sum (template formula), col B = timestamp,
+    //    cols C+ = one consumption column per CSV/Lieferstelle
+    let gesamtError = null;
+    const glTitle = sheetTitles.find(t => /gesamtlast/i.test(t));
+    if (glTitle && csvContents && csvContents.length > 0) {
+      try {
+        // Parse each CSV individually (not stacked)
+        const datasets = csvContents.map(csv =>
+          parseCSV(csv).filter(r => r.some(c => String(c).trim()))
+        );
+
+        // Detect if first row is a text header (not a date/number)
+        function isHeader(row) {
+          const first = String(row[0] || '').trim();
+          return first && isNaN(parseFloat(first)) && !/^\d{2}[.\-\/]/.test(first);
+        }
+
+        // From a CSV dataset, detect which column index holds the value
+        function detectValueCol(rows, headerRow) {
+          if (headerRow) {
+            const hi = rows[0].findIndex(h =>
+              /wert|kwh|mwh|kw\b|verbrauch|energie/i.test(String(h))
+            );
+            if (hi >= 0) return hi;
+          }
+          // Fall back: last column that is numeric in first data row
+          const dataRow = rows[headerRow ? 1 : 0] || [];
+          for (let i = dataRow.length - 1; i >= 0; i--) {
+            const v = String(dataRow[i]).replace(',', '.').trim();
+            if (v !== '' && !isNaN(parseFloat(v))) return i;
+          }
+          return dataRow.length - 1;
+        }
+
+        // Build timestamp list from first dataset
+        const firstDS   = datasets[0] || [];
+        const firstHdr  = firstDS.length > 0 && isHeader(firstDS[0]);
+        const firstStart = firstHdr ? 1 : 0;
+
+        // Detect timestamp cols (some CSVs have date + time in separate cols)
+        function buildTimestamp(row) {
+          const a = String(row[0] || '').trim();
+          const b = String(row[1] || '').trim();
+          // If col 1 looks like a time (HH:MM) append it
+          if (b && /^\d{2}:\d{2}/.test(b)) return `${a} ${b}`;
+          return a;
+        }
+
+        // Extract Lieferstellen info from XLSX (matched by row index to CSVs)
+        const lieferstellen = [];
+        if (abnahmeRows.length > 1) {
+          const hdrs = abnahmeRows[0].map(h => String(h).toLowerCase().trim());
+          const maloIdx    = hdrs.findIndex(h => /marktlok|malo\b/.test(h));
+          const meloIdx    = hdrs.findIndex(h => /messlok|melo\b/.test(h));
+          const strasseIdx = hdrs.findIndex(h => /stra[ßs]/i.test(h));
+          const plzIdx     = hdrs.findIndex(h => /^plz$|postleitz/.test(h));
+          const ortIdx     = hdrs.findIndex(h => /^ort$|^stadt$|^gemeinde$/.test(h));
+          // also try a single "Adresse" column
+          const adresseIdx = hdrs.findIndex(h => /^adresse?$|^anschrift$/.test(h));
+
+          for (let i = 1; i < abnahmeRows.length; i++) {
+            const r = abnahmeRows[i];
+            if (!r.some(c => String(c).trim())) continue;
+            const malo = maloIdx >= 0 ? String(r[maloIdx] || '').trim() : '';
+            const melo = meloIdx >= 0 ? String(r[meloIdx] || '').trim() : '';
+            let addr = '';
+            if (adresseIdx >= 0) {
+              addr = String(r[adresseIdx] || '').trim();
+            } else {
+              const strasse = strasseIdx >= 0 ? String(r[strasseIdx] || '').trim() : '';
+              const plz     = plzIdx  >= 0 ? String(r[plzIdx]  || '').trim() : '';
+              const ort     = ortIdx  >= 0 ? String(r[ortIdx]  || '').trim() : '';
+              addr = [strasse, [plz, ort].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+            }
+            lieferstellen.push({ malo, melo, addr });
+          }
+        }
+
+        // Build output: row 1 = MaLo header, row 2 = Address header, rows 3+ = data
+        const maloRow = ['', 'Zeitstempel'];
+        const addrRow = ['', ''];
+        datasets.forEach((_, i) => {
+          const ls = lieferstellen[i];
+          maloRow.push(ls?.malo || `Lieferstelle ${i + 1}`);
+          addrRow.push(ls?.addr || '');
+        });
+
+        const dataRows = [];
+        const numRows = firstDS.length - firstStart;
+        for (let r = 0; r < numRows; r++) {
+          const out = ['', buildTimestamp(firstDS[firstStart + r] || [])];
+          datasets.forEach(ds => {
+            const hdr = ds.length > 0 && isHeader(ds[0]);
+            const start = hdr ? 1 : 0;
+            const valCol = detectValueCol(ds, hdr);
+            const row = ds[start + r] || [];
+            // German decimal comma → dot for Sheets USER_ENTERED
+            const raw = String(row[valCol] || '').trim().replace(',', '.');
+            out.push(raw !== '' && !isNaN(parseFloat(raw)) ? parseFloat(raw) : '');
+          });
+          dataRows.push(out);
+        }
+
+        const glValues = [maloRow, addrRow, ...dataRows];
+        await sheets.spreadsheets.values.batchUpdate({
+          spreadsheetId: newId,
+          requestBody: {
+            valueInputOption: 'USER_ENTERED',
+            data: [{ range: `'${glTitle}'!A1`, values: glValues }],
+          },
+        });
+      } catch (e) {
+        gesamtError = e.message;
+      }
+    }
+
+    res.status(200).json({ url, sheetTitles, abnahmeError, gesamtError });
   } catch (err) {
     const detail = err.response?.data?.error || err.message;
     res.status(500).json({ error: typeof detail === 'object' ? JSON.stringify(detail) : detail });
