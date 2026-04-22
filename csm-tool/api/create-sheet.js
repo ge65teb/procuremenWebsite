@@ -162,7 +162,7 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    // 7. Build Gesamtlastgang
+    // 7. Build Gesamtlastgang — reads from Lastgänge tab, writes to Gesamtlastgang
     // Sheet starts at col B. Layout (verified from template):
     //   D7        = today's date ("Stand:")
     //   C9        = company name (Firma)
@@ -175,11 +175,26 @@ module.exports = async function handler(req, res) {
     //   Col G     = SUM formula already in template — do NOT overwrite
     let gesamtError = null;
     const glTitle = sheetTitles.find(t => /gesamtlast/i.test(t));
-    if (glTitle && csvContents && csvContents.length > 0) {
+    if (glTitle && lgTitle) {
       try {
-        const datasets = csvContents.map(csv =>
-          parseCSV(csv).filter(r => r.some(c => String(c).trim()))
-        );
+        // Read data from Lastgänge tab (already written in step 5)
+        const lgRead = await sheets.spreadsheets.values.get({
+          spreadsheetId: newId,
+          range: `'${lgTitle}'!A:Z`,
+        });
+        const lgRows = (lgRead.data.values || []);
+
+        // Split stacked CSVs by blank separator rows into individual datasets
+        const datasets = [];
+        let current = [];
+        for (const row of lgRows) {
+          if (!row || row.every(c => !String(c).trim())) {
+            if (current.length > 0) { datasets.push(current); current = []; }
+          } else {
+            current.push(row);
+          }
+        }
+        if (current.length > 0) datasets.push(current);
 
         function isHeader(row) {
           const first = String(row[0] || '').trim();
