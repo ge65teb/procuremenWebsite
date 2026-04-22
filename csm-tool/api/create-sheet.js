@@ -41,6 +41,9 @@ module.exports = async function handler(req, res) {
     const drive  = google.drive({ version: 'v3', auth });
     const sheets = google.sheets({ version: 'v4', auth });
 
+    // 0. Verify template is accessible
+    await drive.files.get({ fileId: TEMPLATE_ID, supportsAllDrives: true, fields: 'id,name' });
+
     // 1. Build filename & copy template
     const now     = new Date();
     const dateStr = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}`;
@@ -87,6 +90,7 @@ module.exports = async function handler(req, res) {
 
     res.status(200).json({ url });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    const detail = err.response?.data?.error || err.message;
+    res.status(500).json({ error: typeof detail === 'object' ? JSON.stringify(detail) : detail });
   }
 };
