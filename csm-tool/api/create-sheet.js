@@ -162,116 +162,137 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    // 7. Build Gesamtlastgang: col A = auto-sum (template formula), col B = timestamp,
-    //    cols C+ = one consumption column per CSV/Lieferstelle
+    // 7. Build Gesamtlastgang
+    // Sheet starts at col B. Layout (verified from template):
+    //   D7        = today's date ("Stand:")
+    //   C9        = company name (Firma)
+    //   C10:F10   = Marktlokations-ID per Lieferstelle (cols C-F = LS 1-4)
+    //   C11:F11   = Messlokations-ID per Lieferstelle
+    //   C15:F15   = Standort name per Lieferstelle
+    //   C16:F16   = Straße per Lieferstelle
+    //   C17:F17   = PLZ/Ort per Lieferstelle
+    //   B35:F{n}  = timestamps (col B) + kW values (cols C-F, one per CSV)
+    //   Col G     = SUM formula already in template — do NOT overwrite
     let gesamtError = null;
     const glTitle = sheetTitles.find(t => /gesamtlast/i.test(t));
     if (glTitle && csvContents && csvContents.length > 0) {
       try {
-        // Parse each CSV individually (not stacked)
         const datasets = csvContents.map(csv =>
           parseCSV(csv).filter(r => r.some(c => String(c).trim()))
         );
 
-        // Detect if first row is a text header (not a date/number)
         function isHeader(row) {
           const first = String(row[0] || '').trim();
           return first && isNaN(parseFloat(first)) && !/^\d{2}[.\-\/]/.test(first);
         }
 
-        // From a CSV dataset, detect which column index holds the value
-        function detectValueCol(rows, headerRow) {
-          if (headerRow) {
-            const hi = rows[0].findIndex(h =>
-              /wert|kwh|mwh|kw\b|verbrauch|energie/i.test(String(h))
-            );
+        function detectValueCol(rows, hdr) {
+          if (hdr) {
+            const hi = rows[0].findIndex(h => /wert|kwh|mwh|kw\b|verbrauch|energie/i.test(String(h)));
             if (hi >= 0) return hi;
           }
-          // Fall back: last column that is numeric in first data row
-          const dataRow = rows[headerRow ? 1 : 0] || [];
+          const dataRow = rows[hdr ? 1 : 0] || [];
           for (let i = dataRow.length - 1; i >= 0; i--) {
             const v = String(dataRow[i]).replace(',', '.').trim();
             if (v !== '' && !isNaN(parseFloat(v))) return i;
           }
-          return dataRow.length - 1;
+          return Math.max(0, dataRow.length - 1);
         }
 
-        // Build timestamp list from first dataset
-        const firstDS   = datasets[0] || [];
-        const firstHdr  = firstDS.length > 0 && isHeader(firstDS[0]);
-        const firstStart = firstHdr ? 1 : 0;
-
-        // Detect timestamp cols (some CSVs have date + time in separate cols)
         function buildTimestamp(row) {
           const a = String(row[0] || '').trim();
           const b = String(row[1] || '').trim();
-          // If col 1 looks like a time (HH:MM) append it
-          if (b && /^\d{2}:\d{2}/.test(b)) return `${a} ${b}`;
-          return a;
+          return (b && /^\d{2}:\d{2}/.test(b)) ? `${a} ${b}` : a;
         }
 
-        // Extract Lieferstellen info from XLSX (matched by row index to CSVs)
+        // Max 4 Lieferstellen → cols C, D, E, F (col G = template SUM)
+        const numLS = Math.min(datasets.length, 4);
+        const colLetter = i => String.fromCharCode(67 + i); // C=0, D=1, E=2, F=3
+        const endCol = colLetter(numLS - 1);
+
+        // Extract Lieferstellen from uploaded XLSX (by row order, matching CSVs)
         const lieferstellen = [];
         if (abnahmeRows.length > 1) {
           const hdrs = abnahmeRows[0].map(h => String(h).toLowerCase().trim());
-          const maloIdx    = hdrs.findIndex(h => /marktlok|malo\b/.test(h));
-          const meloIdx    = hdrs.findIndex(h => /messlok|melo\b/.test(h));
-          const strasseIdx = hdrs.findIndex(h => /stra[ßs]/i.test(h));
-          const plzIdx     = hdrs.findIndex(h => /^plz$|postleitz/.test(h));
-          const ortIdx     = hdrs.findIndex(h => /^ort$|^stadt$|^gemeinde$/.test(h));
-          // also try a single "Adresse" column
-          const adresseIdx = hdrs.findIndex(h => /^adresse?$|^anschrift$/.test(h));
-
+          const ix = {
+            malo:    hdrs.findIndex(h => /marktlok|^malo/.test(h)),
+            melo:    hdrs.findIndex(h => /messlok|^melo/.test(h)),
+            name:    hdrs.findIndex(h => /^name$|standort|bezeichnung/.test(h)),
+            strasse: hdrs.findIndex(h => /stra[ßs]/i.test(h)),
+            plz:     hdrs.findIndex(h => /^plz$/.test(h)),
+            ort:     hdrs.findIndex(h => /^ort$|^stadt$/.test(h)),
+            adresse: hdrs.findIndex(h => /^adresse?$|^anschrift$/.test(h)),
+          };
+          const g = (r, k) => ix[k] >= 0 ? String(r[ix[k]] || '').trim() : '';
           for (let i = 1; i < abnahmeRows.length; i++) {
             const r = abnahmeRows[i];
             if (!r.some(c => String(c).trim())) continue;
-            const malo = maloIdx >= 0 ? String(r[maloIdx] || '').trim() : '';
-            const melo = meloIdx >= 0 ? String(r[meloIdx] || '').trim() : '';
-            let addr = '';
-            if (adresseIdx >= 0) {
-              addr = String(r[adresseIdx] || '').trim();
-            } else {
-              const strasse = strasseIdx >= 0 ? String(r[strasseIdx] || '').trim() : '';
-              const plz     = plzIdx  >= 0 ? String(r[plzIdx]  || '').trim() : '';
-              const ort     = ortIdx  >= 0 ? String(r[ortIdx]  || '').trim() : '';
-              addr = [strasse, [plz, ort].filter(Boolean).join(' ')].filter(Boolean).join(', ');
-            }
-            lieferstellen.push({ malo, melo, addr });
+            const strasse = g(r, 'strasse');
+            const plz = g(r, 'plz');
+            const ort = g(r, 'ort');
+            const addr = ix.adresse >= 0 ? g(r, 'adresse')
+              : [strasse, [plz, ort].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+            lieferstellen.push({ malo: g(r,'malo'), melo: g(r,'melo'), name: g(r,'name'), addr });
           }
         }
 
-        // Build output: row 1 = MaLo header, row 2 = Address header, rows 3+ = data
-        const maloRow = ['', 'Zeitstempel'];
-        const addrRow = ['', ''];
-        datasets.forEach((_, i) => {
-          const ls = lieferstellen[i];
-          maloRow.push(ls?.malo || `Lieferstelle ${i + 1}`);
-          addrRow.push(ls?.addr || '');
-        });
+        // Today's date for "Stand:" field
+        const now2 = new Date();
+        const todayStr = `${String(now2.getDate()).padStart(2,'0')}.${String(now2.getMonth()+1).padStart(2,'0')}.${now2.getFullYear()}`;
 
-        const dataRows = [];
-        const numRows = firstDS.length - firstStart;
-        for (let r = 0; r < numRows; r++) {
-          const out = ['', buildTimestamp(firstDS[firstStart + r] || [])];
-          datasets.forEach(ds => {
-            const hdr = ds.length > 0 && isHeader(ds[0]);
-            const start = hdr ? 1 : 0;
-            const valCol = detectValueCol(ds, hdr);
-            const row = ds[start + r] || [];
-            // German decimal comma → dot for Sheets USER_ENTERED
-            const raw = String(row[valCol] || '').trim().replace(',', '.');
-            out.push(raw !== '' && !isNaN(parseFloat(raw)) ? parseFloat(raw) : '');
-          });
-          dataRows.push(out);
+        const glBatch = [
+          { range: `'${glTitle}'!D7`, values: [[todayStr]] },
+          { range: `'${glTitle}'!C9`, values: [[company || '']] },
+        ];
+
+        // Lieferstellen metadata spread across cols C-F (one col per LS)
+        if (numLS > 0) {
+          const maloRow = [], meloRow = [], nameRow = [], strasseRow = [], plzOrtRow = [];
+          for (let i = 0; i < numLS; i++) {
+            const ls = lieferstellen[i] || {};
+            maloRow.push(ls.malo || '');
+            meloRow.push(ls.melo || '');
+            nameRow.push(ls.name || '');
+            const parts = (ls.addr || '').split(', ');
+            strasseRow.push(parts[0] || '');
+            plzOrtRow.push(parts.slice(1).join(', ') || '');
+          }
+          glBatch.push({ range: `'${glTitle}'!C10:${endCol}10`, values: [maloRow] });
+          if (meloRow.some(v => v))    glBatch.push({ range: `'${glTitle}'!C11:${endCol}11`, values: [meloRow] });
+          if (nameRow.some(v => v))    glBatch.push({ range: `'${glTitle}'!C15:${endCol}15`, values: [nameRow] });
+          if (strasseRow.some(v => v)) glBatch.push({ range: `'${glTitle}'!C16:${endCol}16`, values: [strasseRow] });
+          if (plzOrtRow.some(v => v))  glBatch.push({ range: `'${glTitle}'!C17:${endCol}17`, values: [plzOrtRow] });
         }
 
-        const glValues = [maloRow, addrRow, ...dataRows];
+        // Data rows starting at row 35: col B = timestamp, cols C-F = kW values
+        const firstDS    = datasets[0] || [];
+        const firstHdr   = firstDS.length > 0 && isHeader(firstDS[0]);
+        const firstStart = firstHdr ? 1 : 0;
+        const numRows    = firstDS.length - firstStart;
+
+        if (numRows > 0) {
+          const dataRows = [];
+          for (let r = 0; r < numRows; r++) {
+            const row = [buildTimestamp(firstDS[firstStart + r] || [])];
+            for (let c = 0; c < numLS; c++) {
+              const ds = datasets[c];
+              const hdr = ds.length > 0 && isHeader(ds[0]);
+              const valCol = detectValueCol(ds, hdr);
+              const dr = ds[(hdr ? 1 : 0) + r] || [];
+              const raw = String(dr[valCol] || '').trim().replace(',', '.');
+              row.push(raw !== '' && !isNaN(parseFloat(raw)) ? parseFloat(raw) : '');
+            }
+            dataRows.push(row);
+          }
+          glBatch.push({
+            range: `'${glTitle}'!B35:${endCol}${34 + numRows}`,
+            values: dataRows,
+          });
+        }
+
         await sheets.spreadsheets.values.batchUpdate({
           spreadsheetId: newId,
-          requestBody: {
-            valueInputOption: 'USER_ENTERED',
-            data: [{ range: `'${glTitle}'!A1`, values: glValues }],
-          },
+          requestBody: { valueInputOption: 'USER_ENTERED', data: glBatch },
         });
       } catch (e) {
         gesamtError = e.message;
