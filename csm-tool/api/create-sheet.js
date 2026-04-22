@@ -367,6 +367,9 @@ module.exports = async function handler(req, res) {
           for (let i = 1; i < abnahmeRows.length; i++) {
             const r = abnahmeRows[i];
             if (!r || !r.some(c => String(c).trim())) continue;
+            // Only include RLM metering points
+            const messstelle = g(r, 'messstelle');
+            if (messstelle && !/rlm/i.test(messstelle)) continue;
             const strasse = g(r, 'strasse');
             const plz = g(r, 'plz'); const ort = g(r, 'ort');
             const plzOrt = [plz, ort].filter(Boolean).join(' ');
