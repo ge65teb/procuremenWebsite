@@ -122,7 +122,11 @@ module.exports = async function handler(req, res) {
     // 5. Write Sales + Lastgänge in one batch
     const batchData = [...salesData];
 
-    const lgTitle = findSheet('lastgang') || findSheet('lastg');
+    // Prefer exact "Lastgänge" tab; avoid matching "Gesamtlastgang" etc.
+    const lgTitle = sheetTitles.find(t => /^lastg[äa]/i.test(t.trim()))
+                 || sheetTitles.find(t => t.toLowerCase() === 'lastgänge')
+                 || findSheet('lastgänge')
+                 || findSheet('lastgaenge');
     if (lastgaengeData && lgTitle) {
       batchData.push({ ...lastgaengeData, range: `'${lgTitle}'!A1` });
     } else if (lastgaengeData) {
