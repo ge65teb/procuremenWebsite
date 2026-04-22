@@ -134,22 +134,31 @@ module.exports = async function handler(req, res) {
       requestBody: { valueInputOption: 'USER_ENTERED', data: batchData },
     });
 
-    // 6. Write Abnahmestellen separately (different tab, keep errors isolated)
+    // 6. Write Abnahmestellen separately (non-fatal)
+    let abnahmeError = null;
     if (xlsxContent) {
       const rows = parseXLSX(xlsxContent);
       if (rows.length) {
-        const abTitle = findSheet('abnahme') || SHEET_ABNAHME;
-        await sheets.spreadsheets.values.batchUpdate({
-          spreadsheetId: newId,
-          requestBody: {
-            valueInputOption: 'USER_ENTERED',
-            data: [{ range: `'${abTitle}'!A1`, values: rows }],
-          },
-        });
+        const abTitle = findSheet('abnahme') || findSheet('lieferst') || null;
+        if (abTitle) {
+          try {
+            await sheets.spreadsheets.values.batchUpdate({
+              spreadsheetId: newId,
+              requestBody: {
+                valueInputOption: 'USER_ENTERED',
+                data: [{ range: `'${abTitle}'!A1`, values: rows }],
+              },
+            });
+          } catch (e) {
+            abnahmeError = e.message;
+          }
+        } else {
+          abnahmeError = `Tab not found. Available tabs: ${sheetTitles.join(', ')}`;
+        }
       }
     }
 
-    res.status(200).json({ url });
+    res.status(200).json({ url, sheetTitles, abnahmeError });
   } catch (err) {
     const detail = err.response?.data?.error || err.message;
     res.status(500).json({ error: typeof detail === 'object' ? JSON.stringify(detail) : detail });
