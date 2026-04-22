@@ -484,7 +484,10 @@ module.exports = async function handler(req, res) {
         const b35Val = ((b35Read.data.values || [['']])[0] || [''])[0];
         const startDt = parseDt(b35Val);
 
-        const sumColLetter = colLetter(numCols); // sum column (G + any extra cols inserted)
+        // Sum column is always G (colLetter(4)) in the template.
+        // If we inserted numExtraCols before G, it shifts right by that many.
+        // colLetter(max(4, numCols)) covers both cases.
+        const sumColLetter = colLetter(Math.max(4, numCols));
         const glSheetId    = sheetIdMap[glTitle];
 
         if (startDt && glSheetId !== undefined) {
@@ -554,29 +557,37 @@ module.exports = async function handler(req, res) {
             springRowAdj += 4;
           }
 
-          // 3. Copy sum column → "2) Input - Load profile" B2+ (values only)
-          const inputTitle = sheetTitles.find(t => /2\).*input/i.test(t))
-                          || sheetTitles.find(t => /input.*load/i.test(t))
-                          || sheetTitles.find(t => /load.*profile/i.test(t));
-          if (inputTitle) {
-            const sumRead = await sheets.spreadsheets.values.get({
-              spreadsheetId: newId,
-              range: `'${glTitle}'!${sumColLetter}35:${sumColLetter}70000`,
-              valueRenderOption: 'UNFORMATTED_VALUE',
-            });
-            const sumVals = (sumRead.data.values || []).map(r => [r[0] !== undefined ? r[0] : '']);
-            if (sumVals.length > 0) {
-              await sheets.spreadsheets.values.batchUpdate({
+        }
+
+        // 3. Copy sum column → "2) Input - Load profile" B2+ (values only)
+        // Runs independently of DST corrections so a missing start timestamp doesn't block it.
+        if (numCols > 0) {
+          try {
+            const inputTitle = sheetTitles.find(t => /2\).*input/i.test(t))
+                            || sheetTitles.find(t => /input.*load/i.test(t))
+                            || sheetTitles.find(t => /load.*profile/i.test(t));
+            if (inputTitle) {
+              const sumRead = await sheets.spreadsheets.values.get({
                 spreadsheetId: newId,
-                requestBody: {
-                  valueInputOption: 'RAW',
-                  data: [{
-                    range:  `'${inputTitle}'!B2:B${1 + sumVals.length}`,
-                    values: sumVals,
-                  }],
-                },
+                range: `'${glTitle}'!${sumColLetter}35:${sumColLetter}70000`,
+                valueRenderOption: 'UNFORMATTED_VALUE',
               });
+              const sumVals = (sumRead.data.values || []).map(r => [r[0] !== undefined ? r[0] : '']);
+              if (sumVals.length > 0) {
+                await sheets.spreadsheets.values.batchUpdate({
+                  spreadsheetId: newId,
+                  requestBody: {
+                    valueInputOption: 'RAW',
+                    data: [{
+                      range:  `'${inputTitle}'!B2:B${1 + sumVals.length}`,
+                      values: sumVals,
+                    }],
+                  },
+                });
+              }
             }
+          } catch (e) {
+            gesamtError = (gesamtError ? gesamtError + ' | ' : '') + 'InputLoad: ' + e.message;
           }
         }
       } catch (e) {
