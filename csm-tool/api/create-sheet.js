@@ -111,8 +111,9 @@ module.exports = async function handler(req, res) {
     }
 
     // 4. Fetch actual sheet names from the copied file
-    const meta = await sheets.spreadsheets.get({ spreadsheetId: newId, fields: 'sheets.properties.title' });
+    const meta = await sheets.spreadsheets.get({ spreadsheetId: newId, fields: 'sheets.properties' });
     const sheetTitles = meta.data.sheets.map(s => s.properties.title);
+    const sheetIdMap  = Object.fromEntries(meta.data.sheets.map(s => [s.properties.title, s.properties.sheetId]));
 
     function findSheet(keyword) {
       return sheetTitles.find(t => t.toLowerCase().includes(keyword.toLowerCase())) || null;
@@ -254,10 +255,51 @@ module.exports = async function handler(req, res) {
           info.valueCols.forEach(ci => allValCols.push({ di, ci }));
         });
 
-        // Max 4 → cols C-F; extend to G, H... if more (col letter function handles >4)
-        const numCols = Math.min(allValCols.length, 4);
-        const colLetter = i => String.fromCharCode(67 + i); // C=0, D=1, E=2, F=3
-        const endCol = numCols > 0 ? colLetter(numCols - 1) : 'C';
+        // No cap: support all value columns found in the data
+        const numCols  = allValCols.length;
+        const colLetter = i => String.fromCharCode(67 + i); // 0=C, 1=D, …, 4=G, 5=H, …
+        const endCol   = numCols > 0 ? colLetter(numCols - 1) : 'C';
+
+        // If >4 columns: insert extra columns before the sum column (G = sheet col-index 6).
+        // Inserting before G causes Sheets to auto-extend the sum formula from sum(C:F) → sum(C:H) etc.
+        const numExtraCols = Math.max(0, numCols - 4);
+        if (numExtraCols > 0 && sheetIdMap[glTitle] !== undefined) {
+          await sheets.spreadsheets.batchUpdate({
+            spreadsheetId: newId,
+            requestBody: {
+              requests: [{
+                insertDimension: {
+                  range: {
+                    sheetId:    sheetIdMap[glTitle],
+                    dimension:  'COLUMNS',
+                    startIndex: 6,                     // before col G (0-indexed from A)
+                    endIndex:   6 + numExtraCols,
+                  },
+                  inheritFromBefore: true,             // copy formatting from col F
+                },
+              }],
+            },
+          });
+          // Write column headers for the new columns (rows 29 + 34)
+          const extraHdrs = Array(numExtraCols).fill('Wirkleistung (Entnahme)');
+          const extraWert = Array(numExtraCols).fill('Wert (kW)');
+          const extraSum  = [];
+          for (let i = 4; i < numCols; i++) {
+            extraSum.push(`=SUM(${colLetter(i)}35:${colLetter(i)}35266)/4`);
+          }
+          const extraStartCol = colLetter(4); // G after insert
+          await sheets.spreadsheets.values.batchUpdate({
+            spreadsheetId: newId,
+            requestBody: {
+              valueInputOption: 'USER_ENTERED',
+              data: [
+                { range: `'${glTitle}'!${extraStartCol}29:${endCol}29`, values: [extraHdrs] },
+                { range: `'${glTitle}'!${extraStartCol}32:${endCol}32`, values: [extraSum]  },
+                { range: `'${glTitle}'!${extraStartCol}34:${endCol}34`, values: [extraWert] },
+              ],
+            },
+          });
+        }
 
         // Extract Lieferstellen from XLSX — i-th data row → i-th value column
         const lieferstellen = [];
