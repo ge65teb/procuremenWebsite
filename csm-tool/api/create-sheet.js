@@ -431,8 +431,9 @@ module.exports = async function handler(req, res) {
         const firstInfo  = dsInfo[0] || { start: 0, valueCols: [] };
         const numRows    = firstDS.length - firstInfo.start;
 
+        // Declared outside the if-block so it's in scope for DST and the copy below
+        const dataRows = [];
         if (numRows > 0 && numCols > 0) {
-          const dataRows = [];
           for (let r = 0; r < numRows; r++) {
             const firstRow = firstDS[firstInfo.start + r] || [];
             const ts = buildTimestamp(firstRow, firstInfo.valueCols);
@@ -465,23 +466,41 @@ module.exports = async function handler(req, res) {
           return new Date(year, month0, lastDay.getDate() - (dow === 0 ? 0 : dow));
         }
 
-        // Parse German "DD.MM.YYYY HH:MM" or ISO "YYYY-MM-DD HH:MM" timestamp string
+        // Parse timestamp. Handles:
+        //   "DD.MM.YYYY HH:MM"  (4-digit year)
+        //   "DD.MM.YY H:MM"     (2-digit year, single-digit hour — Google Sheets display format)
+        //   "YYYY-MM-DD HH:MM"  (ISO)
+        //   Excel/Sheets serial number (float > 40000)
         function parseDt(s) {
-          if (!s) return null;
+          if (s === null || s === undefined || s === '') return null;
+          const n = parseFloat(String(s));
+          if (!isNaN(n) && n > 40000 && n < 60000) {
+            // Sheets serial → JS Date in local time (treating serial as local days)
+            return new Date(Math.round((n - 25569) * 86400000));
+          }
           const str = String(s).trim();
-          const m1 = str.match(/^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2})/);
-          if (m1) return new Date(+m1[3], +m1[2]-1, +m1[1], +m1[4], +m1[5], 0, 0);
-          const m2 = str.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+          // DD.MM.YYYY HH:MM or DD.MM.YY H:MM (handles 1- or 2-digit hour)
+          const m1 = str.match(/^(\d{2})\.(\d{2})\.(\d{2,4})\s+(\d{1,2}):(\d{2})/);
+          if (m1) {
+            const yr = m1[3].length === 2
+              ? (+m1[3] < 50 ? 2000 + +m1[3] : 1900 + +m1[3])
+              : +m1[3];
+            return new Date(yr, +m1[2]-1, +m1[1], +m1[4], +m1[5], 0, 0);
+          }
+          const m2 = str.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{1,2}):(\d{2})/);
           if (m2) return new Date(+m2[1], +m2[2]-1, +m2[3], +m2[4], +m2[5], 0, 0);
           return null;
         }
 
-        // Derive startDt from the first data row we already have in memory.
-        // Falls back to Jan 1 of anfang year (standard for annual profiles).
-        // This avoids reading B35 from the sheet, which Sheets stores as a date
-        // serial number making string parsing unreliable.
-        const startDt = (dataRows.length > 0 ? parseDt(dataRows[0][0]) : null)
-                     || new Date(anfang, 0, 1, 0, 0, 0, 0);
+        // Derive start timestamp from the first data row we already have in memory.
+        // This avoids reading B35 from the sheet (Sheets stores dates as serials,
+        // not strings, so string parsing was unreliable).
+        // The DST year range is taken from the DATA itself, not from anfang/ende,
+        // because the delivery year (e.g. 2027) may differ from the data year (e.g. 2025).
+        const startDt = dataRows.length > 0 ? parseDt(dataRows[0][0]) : null;
+        const lastDt  = dataRows.length > 0 ? parseDt(dataRows[dataRows.length - 1][0]) : null;
+        const dstYearFrom = startDt ? startDt.getFullYear() : anfang;
+        const dstYearTo   = lastDt  ? lastDt.getFullYear()  : ende;
 
         const glSheetId = sheetIdMap[glTitle];
 
@@ -489,7 +508,7 @@ module.exports = async function handler(req, res) {
         try {
           if (startDt && glSheetId !== undefined) {
             // 1. Delete fall-back duplicates first (highest rows → descending years)
-            for (let year = ende; year >= anfang; year--) {
+            for (let year = dstYearTo; year >= dstYearFrom; year--) {
               const fallSunday = lastSundayOf(year, 9); // October
               const fallDt     = new Date(year, 9, fallSunday.getDate(), 2, 0, 0, 0);
               const fallOffset = Math.round((fallDt - startDt) / (15 * 60 * 1000));
@@ -512,7 +531,7 @@ module.exports = async function handler(req, res) {
 
             // 2. Insert spring-forward rows (lowest rows → ascending years, adjust for prior inserts)
             let springRowAdj = 0;
-            for (let year = anfang; year <= ende; year++) {
+            for (let year = dstYearFrom; year <= dstYearTo; year++) {
               const springSunday = lastSundayOf(year, 2); // March
               const springDt     = new Date(year, 2, springSunday.getDate(), 2, 0, 0, 0);
               const springOffset = Math.round((springDt - startDt) / (15 * 60 * 1000));
@@ -559,42 +578,31 @@ module.exports = async function handler(req, res) {
         }
 
         // 3. Copy load totals → "2) Input - Load profile" B2+
-        // Read data columns C:endCol from Gesamtlastgang (post-DST), sum each row in JS.
-        // This avoids any dependency on the SUM formula in col G which only exists in row 35.
-        let inputCopyDebug = { numCols, endCol, inputTitle: null, rowsRead: 0, rowsWritten: 0 };
-        if (numCols > 0) {
+        // Sum value columns of dataRows in memory (no extra API read needed).
+        // dataRows[i] = [timestamp, val1, val2, ..., valN] — sum indices 1..N.
+        let inputCopyDebug = { numCols, endCol, inputTitle: null, rowsWritten: 0 };
+        if (numCols > 0 && dataRows.length > 0) {
           try {
             const inputTitle = sheetTitles.find(t => /2\).*input/i.test(t))
                             || sheetTitles.find(t => /input.*load/i.test(t))
                             || sheetTitles.find(t => /load.*profile/i.test(t));
             inputCopyDebug.inputTitle = inputTitle || '(not found)';
             if (inputTitle) {
-              // Read all value columns (C … endCol) from Gesamtlastgang rows 35+
-              const dataRead = await sheets.spreadsheets.values.get({
-                spreadsheetId: newId,
-                range: `'${glTitle}'!C35:${endCol}70000`,
-                valueRenderOption: 'UNFORMATTED_VALUE',
-              });
-              const rawRows = dataRead.data.values || [];
-              inputCopyDebug.rowsRead = rawRows.length;
-              // Sum across columns for each row
-              const inputVals = rawRows.map(row => {
-                const sum = row.reduce((s, v) => {
-                  const n = parseFloat(String(v).replace(',', '.'));
+              const inputVals = dataRows.map(row => {
+                const sum = row.slice(1).reduce((s, v) => {
+                  const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'));
                   return s + (isNaN(n) ? 0 : n);
                 }, 0);
-                return [sum];
+                return [Math.round(sum * 10000) / 10000]; // round to 4 decimal places
               });
-              if (inputVals.length > 0) {
-                await sheets.spreadsheets.values.batchUpdate({
-                  spreadsheetId: newId,
-                  requestBody: {
-                    valueInputOption: 'RAW',
-                    data: [{ range: `'${inputTitle}'!B2:B${1 + inputVals.length}`, values: inputVals }],
-                  },
-                });
-                inputCopyDebug.rowsWritten = inputVals.length;
-              }
+              await sheets.spreadsheets.values.batchUpdate({
+                spreadsheetId: newId,
+                requestBody: {
+                  valueInputOption: 'RAW',
+                  data: [{ range: `'${inputTitle}'!B2:B${1 + inputVals.length}`, values: inputVals }],
+                },
+              });
+              inputCopyDebug.rowsWritten = inputVals.length;
             }
           } catch (e) {
             gesamtError = (gesamtError ? gesamtError + ' | ' : '') + 'InputLoad: ' + e.message;
