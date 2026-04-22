@@ -196,43 +196,79 @@ module.exports = async function handler(req, res) {
         }
         if (current.length > 0) datasets.push(current);
 
+        // Returns true if the row is a text header (not a date/number row)
         function isHeader(row) {
           const first = String(row[0] || '').trim();
-          return first && isNaN(parseFloat(first)) && !/^\d{2}[.\-\/]/.test(first);
+          return first && isNaN(parseFloat(first.replace(',','.'))) && !/^\d{2}[.\-\/]/.test(first);
         }
 
-        function detectValueCol(rows, hdr) {
-          if (hdr) {
-            const hi = rows[0].findIndex(h => /wert|kwh|mwh|kw\b|verbrauch|energie/i.test(String(h)));
-            if (hi >= 0) return hi;
-          }
-          const dataRow = rows[hdr ? 1 : 0] || [];
-          for (let i = dataRow.length - 1; i >= 0; i--) {
-            const v = String(dataRow[i]).replace(',', '.').trim();
-            if (v !== '' && !isNaN(parseFloat(v))) return i;
-          }
-          return Math.max(0, dataRow.length - 1);
+        // Returns true if a cell value is a timestamp-like string (date or time), not a measurement
+        function isTimestampLike(v) {
+          const s = String(v || '').trim();
+          return /^\d{2}:\d{2}/.test(s)               // HH:MM time
+              || /^\d{2}[.\-\/]\d{2}[.\-\/]/.test(s)  // DD.MM.YYYY or similar date
+              || /^\d{4}-\d{2}-\d{2}/.test(s);         // ISO date
         }
 
-        function buildTimestamp(row) {
+        // For a dataset, returns the indices of all value (measurement) columns.
+        // Col 0 is always the primary timestamp; additional date/time cols are skipped.
+        function getValueCols(ds, hdr) {
+          const dataRow = ds[hdr ? 1 : 0] || [];
+          const valueCols = [];
+          for (let i = 1; i < dataRow.length; i++) {
+            const v = String(dataRow[i] || '').trim();
+            if (!v) continue;
+            if (isTimestampLike(v)) continue; // skip end-timestamp or time col
+            const num = v.replace(',', '.');
+            if (!isNaN(parseFloat(num))) valueCols.push(i);
+          }
+          // If header row exists, also add cols whose header indicates a value
+          if (hdr && valueCols.length === 0) {
+            ds[0].forEach((h, i) => {
+              if (i > 0 && /wert|kwh|mwh|kw\b|verbrauch|energie|leistung/i.test(String(h)))
+                valueCols.push(i);
+            });
+          }
+          return valueCols;
+        }
+
+        // Build the timestamp string: combine col 0 + col 1 if col 1 is a time (HH:MM)
+        function buildTimestamp(row, valueCols) {
           const a = String(row[0] || '').trim();
           const b = String(row[1] || '').trim();
-          return (b && /^\d{2}:\d{2}/.test(b)) ? `${a} ${b}` : a;
+          // Append col 1 only if it's a time and NOT a value column
+          if (b && /^\d{2}:\d{2}/.test(b) && !valueCols.includes(1)) return `${a} ${b}`;
+          return a;
         }
 
-        // Max 4 Lieferstellen → cols C, D, E, F (col G = template SUM)
-        const numLS = Math.min(datasets.length, 4);
-        const colLetter = i => String.fromCharCode(67 + i); // C=0, D=1, E=2, F=3
-        const endCol = colLetter(numLS - 1);
+        // Analyse each dataset → { start (data row index), valueCols }
+        const dsInfo = datasets.map(ds => {
+          const hdr = ds.length > 0 && isHeader(ds[0]);
+          return { hdr, start: hdr ? 1 : 0, valueCols: getValueCols(ds, hdr) };
+        });
 
-        // Extract Lieferstellen from uploaded XLSX (by row order, matching CSVs)
+        // Flatten: collect all (datasetIndex, colIndex) pairs in order
+        // This becomes the global list of value columns → mapped 1:1 to Lieferstellen
+        const allValCols = [];
+        dsInfo.forEach((info, di) => {
+          info.valueCols.forEach(ci => allValCols.push({ di, ci }));
+        });
+
+        // Max 4 → cols C-F; extend to G, H... if more (col letter function handles >4)
+        const numCols = Math.min(allValCols.length, 4);
+        const colLetter = i => String.fromCharCode(67 + i); // C=0, D=1, E=2, F=3
+        const endCol = numCols > 0 ? colLetter(numCols - 1) : 'C';
+
+        // Extract Lieferstellen from XLSX — i-th data row → i-th value column
         const lieferstellen = [];
+        const xlsxDebugHdrs = abnahmeRows.length > 0
+          ? abnahmeRows[0].map(h => String(h)).join(' | ') : '(keine XLSX-Daten)';
         if (abnahmeRows.length > 1) {
           const hdrs = abnahmeRows[0].map(h => String(h).toLowerCase().trim());
           const ix = {
-            malo:    hdrs.findIndex(h => /marktlok|^malo/.test(h)),
-            melo:    hdrs.findIndex(h => /messlok|^melo/.test(h)),
-            name:    hdrs.findIndex(h => /^name$|standort|bezeichnung/.test(h)),
+            malo:    hdrs.findIndex(h => /marktlok|malo/.test(h)),
+            melo:    hdrs.findIndex(h => /messlok|melo/.test(h)),
+            name:    hdrs.findIndex(h => /standort|bezeichnung|^name$/.test(h)),
             strasse: hdrs.findIndex(h => /stra[ßs]/i.test(h)),
             plz:     hdrs.findIndex(h => /^plz$/.test(h)),
             ort:     hdrs.findIndex(h => /^ort$|^stadt$/.test(h)),
@@ -241,10 +277,9 @@ module.exports = async function handler(req, res) {
           const g = (r, k) => ix[k] >= 0 ? String(r[ix[k]] || '').trim() : '';
           for (let i = 1; i < abnahmeRows.length; i++) {
             const r = abnahmeRows[i];
-            if (!r.some(c => String(c).trim())) continue;
+            if (!r || !r.some(c => String(c).trim())) continue;
             const strasse = g(r, 'strasse');
-            const plz = g(r, 'plz');
-            const ort = g(r, 'ort');
+            const plz = g(r, 'plz'); const ort = g(r, 'ort');
             const addr = ix.adresse >= 0 ? g(r, 'adresse')
               : [strasse, [plz, ort].filter(Boolean).join(' ')].filter(Boolean).join(', ');
             lieferstellen.push({ malo: g(r,'malo'), melo: g(r,'melo'), name: g(r,'name'), addr });
@@ -260,10 +295,10 @@ module.exports = async function handler(req, res) {
           { range: `'${glTitle}'!C9`, values: [[company || '']] },
         ];
 
-        // Lieferstellen metadata spread across cols C-F (one col per LS)
-        if (numLS > 0) {
+        // Metadata rows: one column per value column (= one per Lieferstelle)
+        if (numCols > 0) {
           const maloRow = [], meloRow = [], nameRow = [], strasseRow = [], plzOrtRow = [];
-          for (let i = 0; i < numLS; i++) {
+          for (let i = 0; i < numCols; i++) {
             const ls = lieferstellen[i] || {};
             maloRow.push(ls.malo || '');
             meloRow.push(ls.melo || '');
@@ -279,25 +314,25 @@ module.exports = async function handler(req, res) {
           if (plzOrtRow.some(v => v))  glBatch.push({ range: `'${glTitle}'!C17:${endCol}17`, values: [plzOrtRow] });
         }
 
-        // Data rows starting at row 35: col B = timestamp, cols C-F = kW values
+        // Data rows: col B = timestamp, cols C+ = one kW value per Lieferstelle
         const firstDS    = datasets[0] || [];
-        const firstHdr   = firstDS.length > 0 && isHeader(firstDS[0]);
-        const firstStart = firstHdr ? 1 : 0;
-        const numRows    = firstDS.length - firstStart;
+        const firstInfo  = dsInfo[0] || { start: 0, valueCols: [] };
+        const numRows    = firstDS.length - firstInfo.start;
 
-        if (numRows > 0) {
+        if (numRows > 0 && numCols > 0) {
           const dataRows = [];
           for (let r = 0; r < numRows; r++) {
-            const row = [buildTimestamp(firstDS[firstStart + r] || [])];
-            for (let c = 0; c < numLS; c++) {
-              const ds = datasets[c];
-              const hdr = ds.length > 0 && isHeader(ds[0]);
-              const valCol = detectValueCol(ds, hdr);
-              const dr = ds[(hdr ? 1 : 0) + r] || [];
-              const raw = String(dr[valCol] || '').trim().replace(',', '.');
-              row.push(raw !== '' && !isNaN(parseFloat(raw)) ? parseFloat(raw) : '');
+            const firstRow = firstDS[firstInfo.start + r] || [];
+            const ts = buildTimestamp(firstRow, firstInfo.valueCols);
+            const outRow = [ts];
+            for (let c = 0; c < numCols; c++) {
+              const { di, ci } = allValCols[c];
+              const info = dsInfo[di];
+              const dr = (datasets[di] || [])[info.start + r] || [];
+              const raw = String(dr[ci] || '').trim().replace(',', '.');
+              outRow.push(raw !== '' && !isNaN(parseFloat(raw)) ? parseFloat(raw) : '');
             }
-            dataRows.push(row);
+            dataRows.push(outRow);
           }
           glBatch.push({
             range: `'${glTitle}'!B35:${endCol}${34 + numRows}`,
@@ -314,7 +349,8 @@ module.exports = async function handler(req, res) {
       }
     }
 
-    res.status(200).json({ url, sheetTitles, abnahmeError, gesamtError });
+    res.status(200).json({ url, sheetTitles, abnahmeError, gesamtError,
+      _debug: { xlsxRows: abnahmeRows.length, xlsxHdrs: abnahmeRows[0] || [] } });
   } catch (err) {
     const detail = err.response?.data?.error || err.message;
     res.status(500).json({ error: typeof detail === 'object' ? JSON.stringify(detail) : detail });
