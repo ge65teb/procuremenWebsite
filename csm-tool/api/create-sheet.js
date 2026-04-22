@@ -180,7 +180,10 @@ module.exports = async function handler(req, res) {
     //   B35:F{n}  = timestamps (col B) + kW values (cols C-F, one per CSV)
     //   Col G     = SUM formula already in template — do NOT overwrite
     let gesamtError = null;
+    const diag = {}; // diagnostic log — returned in _debug
     const glTitle = sheetTitles.find(t => /gesamtlast/i.test(t));
+    diag.glTitle = glTitle || null;
+    diag.lgTitle = lgTitle || null;
     if (glTitle && lgTitle) {
       try {
         // Read data from Lastgänge tab (already written in step 5)
@@ -189,6 +192,9 @@ module.exports = async function handler(req, res) {
           range: `'${lgTitle}'!A:Z`,
         });
         const lgRows = (lgRead.data.values || []);
+        diag.lgRowsCount = lgRows.length;
+        diag.lgRow0 = lgRows[0] ? lgRows[0].slice(0, 4) : null;
+        diag.lgRow1 = lgRows[1] ? lgRows[1].slice(0, 4) : null;
 
         // Split stacked CSVs by blank separator rows into individual datasets
         const datasets = [];
@@ -492,6 +498,11 @@ module.exports = async function handler(req, res) {
           return null;
         }
 
+        diag.numCols    = numCols;
+        diag.numRows    = numRows;
+        diag.dataRows0  = dataRows.length > 0 ? dataRows[0].slice(0, 3) : null;
+        diag.dataRowsN  = dataRows.length;
+
         // Derive start timestamp from the first data row we already have in memory.
         // This avoids reading B35 from the sheet (Sheets stores dates as serials,
         // not strings, so string parsing was unreliable).
@@ -502,16 +513,25 @@ module.exports = async function handler(req, res) {
         const dstYearFrom = startDt ? startDt.getFullYear() : anfang;
         const dstYearTo   = lastDt  ? lastDt.getFullYear()  : ende;
 
+        diag.startDt      = startDt ? startDt.toISOString() : null;
+        diag.lastDt       = lastDt  ? lastDt.toISOString()  : null;
+        diag.dstYearFrom  = dstYearFrom;
+        diag.dstYearTo    = dstYearTo;
+
         const glSheetId = sheetIdMap[glTitle];
 
         // DST corrections — wrapped in own try/catch so errors never suppress the copy below
+        diag.dstAttempted = false;
+        diag.dstOps = [];
         try {
           if (startDt && glSheetId !== undefined) {
+            diag.dstAttempted = true;
             // 1. Delete fall-back duplicates first (highest rows → descending years)
             for (let year = dstYearTo; year >= dstYearFrom; year--) {
               const fallSunday = lastSundayOf(year, 9); // October
               const fallDt     = new Date(year, 9, fallSunday.getDate(), 2, 0, 0, 0);
               const fallOffset = Math.round((fallDt - startDt) / (15 * 60 * 1000));
+              diag.dstOps.push({ op: 'fall', year, fallOffset, fallRow: 34 + fallOffset });
               if (fallOffset <= 0) continue;
               const fallRowIdx = 34 + fallOffset; // 0-indexed sheet row for 02:00
               await sheets.spreadsheets.batchUpdate({
@@ -535,8 +555,9 @@ module.exports = async function handler(req, res) {
               const springSunday = lastSundayOf(year, 2); // March
               const springDt     = new Date(year, 2, springSunday.getDate(), 2, 0, 0, 0);
               const springOffset = Math.round((springDt - startDt) / (15 * 60 * 1000));
-              if (springOffset <= 0) continue;
               const springRowIdx = 34 + springOffset + springRowAdj; // 0-indexed row for 02:00
+              diag.dstOps.push({ op: 'spring', year, springOffset, springRowIdx });
+              if (springOffset <= 0) continue;
 
               await sheets.spreadsheets.batchUpdate({
                 spreadsheetId: newId,
@@ -574,6 +595,7 @@ module.exports = async function handler(req, res) {
             }
           }
         } catch (dstErr) {
+          diag.dstError = dstErr.message;
           gesamtError = (gesamtError ? gesamtError + ' | ' : '') + 'DST: ' + dstErr.message;
         }
 
@@ -610,13 +632,15 @@ module.exports = async function handler(req, res) {
           }
         }
       } catch (e) {
+        diag.outerCatchError = e.message;
         gesamtError = e.message;
       }
     }
 
     res.status(200).json({ url, sheetTitles, abnahmeError, gesamtError,
       _debug: { xlsxRows: abnahmeRows.length, xlsxHdrs: abnahmeRows[0] || [],
-                inputCopyDebug: typeof inputCopyDebug !== 'undefined' ? inputCopyDebug : null } });
+                inputCopyDebug: typeof inputCopyDebug !== 'undefined' ? inputCopyDebug : null,
+                diag } });
   } catch (err) {
     const detail = err.response?.data?.error || err.message;
     res.status(500).json({ error: typeof detail === 'object' ? JSON.stringify(detail) : detail });
