@@ -456,6 +456,129 @@ module.exports = async function handler(req, res) {
           spreadsheetId: newId,
           requestBody: { valueInputOption: 'USER_ENTERED', data: glBatch },
         });
+
+        // ── DST corrections ──────────────────────────────────────────────────
+        // Returns the last Sunday of a given month (0-indexed) in a year as a Date
+        function lastSundayOf(year, month0) {
+          const lastDay = new Date(year, month0 + 1, 0); // last day of month
+          const dow = lastDay.getDay();                   // 0 = Sunday
+          return new Date(year, month0, lastDay.getDate() - (dow === 0 ? 0 : dow));
+        }
+
+        // Parse common German "DD.MM.YYYY HH:MM" or ISO "YYYY-MM-DD HH:MM" timestamp
+        function parseDt(s) {
+          if (!s) return null;
+          const str = String(s).trim();
+          const m1 = str.match(/^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2})/);
+          if (m1) return new Date(+m1[3], +m1[2]-1, +m1[1], +m1[4], +m1[5], 0, 0);
+          const m2 = str.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+          if (m2) return new Date(+m2[1], +m2[2]-1, +m2[3], +m2[4], +m2[5], 0, 0);
+          return null;
+        }
+
+        // Read B35 to get data start timestamp
+        const b35Read = await sheets.spreadsheets.values.get({
+          spreadsheetId: newId,
+          range: `'${glTitle}'!B35`,
+        });
+        const b35Val = ((b35Read.data.values || [['']])[0] || [''])[0];
+        const startDt = parseDt(b35Val);
+
+        const sumColLetter = colLetter(numCols); // sum column (G + any extra cols inserted)
+        const glSheetId    = sheetIdMap[glTitle];
+
+        if (startDt && glSheetId !== undefined) {
+          // 1. Delete fall-back duplicates first (highest rows → descending years)
+          for (let year = ende; year >= anfang; year--) {
+            const fallSunday = lastSundayOf(year, 9); // October
+            const fallDt     = new Date(year, 9, fallSunday.getDate(), 2, 0, 0, 0);
+            const fallOffset = Math.round((fallDt - startDt) / (15 * 60 * 1000));
+            if (fallOffset <= 0) continue;
+            const fallRowIdx = 34 + fallOffset; // 0-indexed sheet row for 02:00
+            await sheets.spreadsheets.batchUpdate({
+              spreadsheetId: newId,
+              requestBody: {
+                requests: [{ deleteDimension: {
+                  range: {
+                    sheetId:    glSheetId,
+                    dimension:  'ROWS',
+                    startIndex: fallRowIdx,
+                    endIndex:   fallRowIdx + 4,
+                  },
+                }}],
+              },
+            });
+          }
+
+          // 2. Insert spring-forward rows (lowest rows → ascending years, adjust for prior inserts)
+          let springRowAdj = 0;
+          for (let year = anfang; year <= ende; year++) {
+            const springSunday = lastSundayOf(year, 2); // March
+            const springDt     = new Date(year, 2, springSunday.getDate(), 2, 0, 0, 0);
+            const springOffset = Math.round((springDt - startDt) / (15 * 60 * 1000));
+            if (springOffset <= 0) continue;
+            const springRowIdx = 34 + springOffset + springRowAdj; // 0-indexed row for 02:00
+
+            await sheets.spreadsheets.batchUpdate({
+              spreadsheetId: newId,
+              requestBody: {
+                requests: [{ insertDimension: {
+                  range: {
+                    sheetId:    glSheetId,
+                    dimension:  'ROWS',
+                    startIndex: springRowIdx,
+                    endIndex:   springRowIdx + 4,
+                  },
+                  inheritFromBefore: true,
+                }}],
+              },
+            });
+
+            // Write timestamps + zero values for the 4 inserted rows (02:00–02:45)
+            const dStr = `${String(springSunday.getDate()).padStart(2,'0')}.${String(springSunday.getMonth()+1).padStart(2,'0')}.${springSunday.getFullYear()}`;
+            const springFillRows = [0,1,2,3].map(q => {
+              const mins = q * 15;
+              const ts   = `${dStr} 02:${String(mins).padStart(2,'0')}`;
+              return [ts, ...Array(numCols).fill(0)];
+            });
+            await sheets.spreadsheets.values.batchUpdate({
+              spreadsheetId: newId,
+              requestBody: {
+                valueInputOption: 'USER_ENTERED',
+                data: [{
+                  range:  `'${glTitle}'!B${springRowIdx + 1}:${endCol}${springRowIdx + 4}`,
+                  values: springFillRows,
+                }],
+              },
+            });
+            springRowAdj += 4;
+          }
+
+          // 3. Copy sum column → "2) Input - Load profile" B2+ (values only)
+          const inputTitle = sheetTitles.find(t => /2\).*input/i.test(t))
+                          || sheetTitles.find(t => /input.*load/i.test(t))
+                          || sheetTitles.find(t => /load.*profile/i.test(t));
+          if (inputTitle) {
+            const sumRead = await sheets.spreadsheets.values.get({
+              spreadsheetId: newId,
+              range: `'${glTitle}'!${sumColLetter}35:${sumColLetter}70000`,
+              valueRenderOption: 'UNFORMATTED_VALUE',
+            });
+            const sumVals = (sumRead.data.values || []).map(r => [r[0] !== undefined ? r[0] : '']);
+            if (sumVals.length > 0) {
+              await sheets.spreadsheets.values.batchUpdate({
+                spreadsheetId: newId,
+                requestBody: {
+                  valueInputOption: 'RAW',
+                  data: [{
+                    range:  `'${inputTitle}'!B2:B${1 + sumVals.length}`,
+                    values: sumVals,
+                  }],
+                },
+              });
+            }
+          }
+        }
       } catch (e) {
         gesamtError = e.message;
       }
