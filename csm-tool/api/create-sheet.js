@@ -464,134 +464,105 @@ module.exports = async function handler(req, res) {
           requestBody: { valueInputOption: 'USER_ENTERED', data: glBatch },
         });
 
+        diag.numCols   = numCols;
+        diag.numRows   = numRows;
+        diag.dataRows0 = dataRows.length > 0 ? dataRows[0].slice(0, 3) : null;
+        diag.dataRowsN = dataRows.length;
+
         // ── DST corrections ──────────────────────────────────────────────────
-        // Returns the last Sunday of a given month (0-indexed) in a year as a Date
+        // Uses serial arithmetic on B35 (UNFORMATTED_VALUE) — avoids all
+        // locale/format/timezone issues that plagued string-based parseDt.
+
         function lastSundayOf(year, month0) {
           const lastDay = new Date(year, month0 + 1, 0);
-          const dow = lastDay.getDay(); // 0 = Sunday
+          const dow = lastDay.getDay();
           return new Date(year, month0, lastDay.getDate() - (dow === 0 ? 0 : dow));
         }
 
-        // Parse timestamp. Handles:
-        //   "DD.MM.YYYY HH:MM"  (4-digit year)
-        //   "DD.MM.YY H:MM"     (2-digit year, single-digit hour — Google Sheets display format)
-        //   "YYYY-MM-DD HH:MM"  (ISO)
-        //   Excel/Sheets serial number (float > 40000)
-        function parseDt(s) {
-          if (s === null || s === undefined || s === '') return null;
-          const n = parseFloat(String(s));
-          if (!isNaN(n) && n > 40000 && n < 60000) {
-            // Sheets serial → JS Date in local time (treating serial as local days)
-            return new Date(Math.round((n - 25569) * 86400000));
-          }
-          const str = String(s).trim();
-          // DD.MM.YYYY HH:MM or DD.MM.YY H:MM (handles 1- or 2-digit hour)
-          const m1 = str.match(/^(\d{2})\.(\d{2})\.(\d{2,4})\s+(\d{1,2}):(\d{2})/);
-          if (m1) {
-            const yr = m1[3].length === 2
-              ? (+m1[3] < 50 ? 2000 + +m1[3] : 1900 + +m1[3])
-              : +m1[3];
-            return new Date(yr, +m1[2]-1, +m1[1], +m1[4], +m1[5], 0, 0);
-          }
-          const m2 = str.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{1,2}):(\d{2})/);
-          if (m2) return new Date(+m2[1], +m2[2]-1, +m2[3], +m2[4], +m2[5], 0, 0);
-          return null;
-        }
+        // Convert JS Date to Excel serial using Jan 1 2025 = 45658 as anchor.
+        // Both dates use new Date(y,m,d,...) so the ms diff is timezone-neutral.
+        const REF_MS     = new Date(2025, 0, 1, 0, 0, 0, 0).getTime();
+        const REF_SERIAL = 45658;
+        function dateToSerial(d) { return REF_SERIAL + (d.getTime() - REF_MS) / 86400000; }
 
-        diag.numCols    = numCols;
-        diag.numRows    = numRows;
-        diag.dataRows0  = dataRows.length > 0 ? dataRows[0].slice(0, 3) : null;
-        diag.dataRowsN  = dataRows.length;
+        // Read B35 with UNFORMATTED_VALUE → exact serial, no format guessing
+        const b35raw = await sheets.spreadsheets.values.get({
+          spreadsheetId: newId,
+          range: `'${glTitle}'!B35`,
+          valueRenderOption: 'UNFORMATTED_VALUE',
+        });
+        const b35Serial = parseFloat(((b35raw.data.values || [['']])[0] || [''])[0]);
+        diag.b35Serial  = b35Serial;
 
-        // Derive start timestamp from the first data row we already have in memory.
-        // This avoids reading B35 from the sheet (Sheets stores dates as serials,
-        // not strings, so string parsing was unreliable).
-        // The DST year range is taken from the DATA itself, not from anfang/ende,
-        // because the delivery year (e.g. 2027) may differ from the data year (e.g. 2025).
-        const startDt = dataRows.length > 0 ? parseDt(dataRows[0][0]) : null;
-        const lastDt  = dataRows.length > 0 ? parseDt(dataRows[dataRows.length - 1][0]) : null;
-        const dstYearFrom = startDt ? startDt.getFullYear() : anfang;
-        const dstYearTo   = lastDt  ? lastDt.getFullYear()  : ende;
-
-        diag.startDt      = startDt ? startDt.toISOString() : null;
-        diag.lastDt       = lastDt  ? lastDt.toISOString()  : null;
-        diag.dstYearFrom  = dstYearFrom;
-        diag.dstYearTo    = dstYearTo;
-
+        // Derive data year range purely from b35Serial and numRows
         const glSheetId = sheetIdMap[glTitle];
+        let dataStartYear = anfang, dataEndYear = ende;
+        if (!isNaN(b35Serial) && b35Serial > 40000) {
+          // Convert serial back to a Date: anchor on REF_MS
+          const startMs = REF_MS + (b35Serial - REF_SERIAL) * 86400000;
+          const endMs   = startMs + (numRows / 96) * 86400000;
+          dataStartYear = new Date(startMs).getFullYear();
+          dataEndYear   = new Date(endMs).getFullYear();
+        }
+        diag.dataStartYear = dataStartYear;
+        diag.dataEndYear   = dataEndYear;
 
-        // DST corrections — wrapped in own try/catch so errors never suppress the copy below
         diag.dstAttempted = false;
         diag.dstOps = [];
         try {
-          if (startDt && glSheetId !== undefined) {
+          if (!isNaN(b35Serial) && b35Serial > 40000 && glSheetId !== undefined && numRows > 0) {
             diag.dstAttempted = true;
+
             // 1. Delete fall-back duplicates first (highest rows → descending years)
-            for (let year = dstYearTo; year >= dstYearFrom; year--) {
-              const fallSunday = lastSundayOf(year, 9); // October
-              const fallDt     = new Date(year, 9, fallSunday.getDate(), 2, 0, 0, 0);
-              const fallOffset = Math.round((fallDt - startDt) / (15 * 60 * 1000));
-              diag.dstOps.push({ op: 'fall', year, fallOffset, fallRow: 34 + fallOffset });
-              if (fallOffset <= 0) continue;
-              const fallRowIdx = 34 + fallOffset; // 0-indexed sheet row for 02:00
+            for (let year = dataEndYear; year >= dataStartYear; year--) {
+              const sun        = lastSundayOf(year, 9);
+              const fallSerial = dateToSerial(new Date(year, 9, sun.getDate(), 2, 0, 0, 0));
+              const offset     = Math.round((fallSerial - b35Serial) * 96);
+              const rowIdx     = 34 + offset; // 0-indexed
+              diag.dstOps.push({ op:'fall', year, offset, rowIdx, sheetRow: rowIdx+1 });
+              if (offset <= 0 || rowIdx >= 34 + numRows) continue;
               await sheets.spreadsheets.batchUpdate({
                 spreadsheetId: newId,
-                requestBody: {
-                  requests: [{ deleteDimension: {
-                    range: {
-                      sheetId:    glSheetId,
-                      dimension:  'ROWS',
-                      startIndex: fallRowIdx,
-                      endIndex:   fallRowIdx + 4,
-                    },
-                  }}],
-                },
+                requestBody: { requests: [{ deleteDimension: {
+                  range: { sheetId: glSheetId, dimension: 'ROWS',
+                           startIndex: rowIdx, endIndex: rowIdx + 4 },
+                }}]},
               });
             }
 
-            // 2. Insert spring-forward rows (lowest rows → ascending years, adjust for prior inserts)
-            let springRowAdj = 0;
-            for (let year = dstYearFrom; year <= dstYearTo; year++) {
-              const springSunday = lastSundayOf(year, 2); // March
-              const springDt     = new Date(year, 2, springSunday.getDate(), 2, 0, 0, 0);
-              const springOffset = Math.round((springDt - startDt) / (15 * 60 * 1000));
-              const springRowIdx = 34 + springOffset + springRowAdj; // 0-indexed row for 02:00
-              diag.dstOps.push({ op: 'spring', year, springOffset, springRowIdx });
-              if (springOffset <= 0) continue;
+            // 2. Insert spring-forward rows (lowest rows first → ascending years)
+            let adj = 0;
+            for (let year = dataStartYear; year <= dataEndYear; year++) {
+              const sun          = lastSundayOf(year, 2);
+              const springSerial = dateToSerial(new Date(year, 2, sun.getDate(), 2, 0, 0, 0));
+              const offset       = Math.round((springSerial - b35Serial) * 96);
+              const rowIdx       = 34 + offset + adj; // 0-indexed: first row of the 02:00 gap
+              diag.dstOps.push({ op:'spring', year, offset, rowIdx, sheetRow: rowIdx+1 });
+              if (offset <= 0 || rowIdx >= 34 + numRows + adj) continue;
 
               await sheets.spreadsheets.batchUpdate({
                 spreadsheetId: newId,
-                requestBody: {
-                  requests: [{ insertDimension: {
-                    range: {
-                      sheetId:    glSheetId,
-                      dimension:  'ROWS',
-                      startIndex: springRowIdx,
-                      endIndex:   springRowIdx + 4,
-                    },
-                    inheritFromBefore: true,
-                  }}],
-                },
+                requestBody: { requests: [{ insertDimension: {
+                  range: { sheetId: glSheetId, dimension: 'ROWS',
+                           startIndex: rowIdx, endIndex: rowIdx + 4 },
+                  inheritFromBefore: true,
+                }}]},
               });
 
-              // Write timestamps + zero values for the 4 inserted rows (02:00–02:45)
-              const dStr = `${String(springSunday.getDate()).padStart(2,'0')}.${String(springSunday.getMonth()+1).padStart(2,'0')}.${springSunday.getFullYear()}`;
-              const springFillRows = [0,1,2,3].map(q => {
-                const mins = q * 15;
-                const ts   = `${dStr} 02:${String(mins).padStart(2,'0')}`;
-                return [ts, ...Array(numCols).fill(0)];
-              });
+              // Fill inserted rows: timestamp 02:00–02:45 + zeros
+              const dStr = `${String(sun.getDate()).padStart(2,'0')}.${String(sun.getMonth()+1).padStart(2,'0')}.${sun.getFullYear()}`;
+              const fillRows = [0,1,2,3].map(q =>
+                [`${dStr} 02:${String(q*15).padStart(2,'0')}`, ...Array(numCols).fill(0)]
+              );
               await sheets.spreadsheets.values.batchUpdate({
                 spreadsheetId: newId,
                 requestBody: {
                   valueInputOption: 'USER_ENTERED',
-                  data: [{
-                    range:  `'${glTitle}'!B${springRowIdx + 1}:${endCol}${springRowIdx + 4}`,
-                    values: springFillRows,
-                  }],
+                  data: [{ range: `'${glTitle}'!B${rowIdx+1}:${endCol}${rowIdx+4}`,
+                           values: fillRows }],
                 },
               });
-              springRowAdj += 4;
+              adj += 4;
             }
           }
         } catch (dstErr) {
